@@ -59,7 +59,9 @@ public class SecurityConfig {
                                                 response,
                                                 HttpServletResponse.SC_UNAUTHORIZED,
                                                 "invalid_token",
-                                                "Authentication is required"
+                                                authenticationErrorMessage(
+                                                        request.getRequestURI()
+                                                )
                                         )
                         )
                         .accessDeniedHandler(
@@ -68,7 +70,9 @@ public class SecurityConfig {
                                                 response,
                                                 HttpServletResponse.SC_FORBIDDEN,
                                                 "permission_denied",
-                                                "You do not have permission"
+                                                accessDeniedMessage(
+                                                        request.getRequestURI()
+                                                )
                                         )
                         )
                 )
@@ -223,5 +227,25 @@ public class SecurityConfig {
                 response.getOutputStream(),
                 ApiResponse.error(errorCode, message)
         );
+    }
+
+    private String authenticationErrorMessage(String requestUri) {
+        if (requestUri != null && requestUri.endsWith("/logout")) {
+            return "ログアウトに必要な認証情報が不正です";
+        }
+
+        return "認証情報が不正です";
+    }
+
+    private String accessDeniedMessage(String requestUri) {
+        if (requestUri != null && requestUri.endsWith("/client-roles")) {
+            return "ロール一覧を取得する権限がありません";
+        }
+
+        if (requestUri != null && requestUri.endsWith("/user-info")) {
+            return "ユーザー情報を取得する権限がありません";
+        }
+
+        return "権限がありません";
     }
 }

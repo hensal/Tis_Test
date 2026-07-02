@@ -22,6 +22,11 @@ import java.util.List;
 @Service
 public class KeycloakAdminService {
 
+    private static final String AUTH_INVALID_MESSAGE = "認証情報が不正です";
+    private static final String LOGOUT_INVALID_MESSAGE = "ログアウトに必要な認証情報が不正です";
+    private static final String CLIENT_ROLES_PERMISSION_MESSAGE = "ロール一覧を取得する権限がありません";
+    private static final String USER_NOT_FOUND_MESSAGE = "対象ユーザーが見つかりません";
+
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
@@ -48,33 +53,43 @@ public class KeycloakAdminService {
     }
 
     public List<RoleData> getClientRoles(String clientId, String accessToken) {
-        JsonNode client = findClientByClientId(
-                clientId,
-                accessToken
-        );
+        try {
+            JsonNode client = findClientByClientId(
+                    clientId,
+                    accessToken
+            );
 
-        String internalClientId = client.path("id").asText();
+            String internalClientId = client.path("id").asText();
 
-        String url = adminBaseUrl()
-                + "/clients/"
-                + encode(internalClientId)
-                + "/roles";
+            String url = adminBaseUrl()
+                    + "/clients/"
+                    + encode(internalClientId)
+                    + "/roles";
 
-        JsonNode roles = getJson(url, accessToken);
+            JsonNode roles = getJson(url, accessToken);
 
-        List<RoleData> result = new ArrayList<>();
+            List<RoleData> result = new ArrayList<>();
 
-        for (JsonNode role : roles) {
-            result.add(new RoleData(
-                    role.path("id").asText(),
-                    role.path("name").asText(),
-                    role.path("description").isNull()
-                            ? null
-                            : role.path("description").asText(null)
-            ));
+            for (JsonNode role : roles) {
+                result.add(new RoleData(
+                        role.path("id").asText(),
+                        role.path("name").asText(),
+                        role.path("description").isNull()
+                                ? null
+                                : role.path("description").asText(null)
+                ));
+            }
+
+            return result;
+        } catch (KeycloakAdminException e) {
+            if ("not_found".equals(e.getErrorCode())
+                    || "client_not_found".equals(e.getErrorCode())
+                    || "permission_denied".equals(e.getErrorCode())) {
+                throw clientRolesPermissionException();
+            }
+
+            throw e;
         }
-
-        return result;
     }
 
     public UserData getUserBySub(String sub, String accessToken) {
@@ -82,7 +97,17 @@ public class KeycloakAdminService {
                 + "/users/"
                 + encode(sub);
 
-        JsonNode user = getJson(url, accessToken);
+        JsonNode user;
+
+        try {
+            user = getJson(url, accessToken);
+        } catch (KeycloakAdminException e) {
+            if ("not_found".equals(e.getErrorCode())) {
+                throw userNotFoundException();
+            }
+
+            throw e;
+        }
 
         String firstName = user.path("firstName").asText("");
         String lastName = user.path("lastName").asText("");
@@ -107,7 +132,13 @@ public class KeycloakAdminService {
             String sessionId,
             String accessToken
     ) {
+        JsonNode sessions = getUserSessionsForLogout(userId, accessToken);
+
         if (sessionId != null && !sessionId.isBlank()) {
+            if (!hasSession(sessions, sessionId)) {
+                throw userLoggedOutException();
+            }
+
             String url = adminBaseUrl()
                     + "/sessions/"
                     + encode(sessionId);
@@ -116,12 +147,57 @@ public class KeycloakAdminService {
             return;
         }
 
+        if (!sessions.elements().hasNext()) {
+            throw userLoggedOutException();
+        }
+
         String url = adminBaseUrl()
                 + "/users/"
                 + encode(userId)
                 + "/logout";
 
         exchangeWithoutBody(url, HttpMethod.POST, accessToken);
+    }
+
+    private JsonNode getUserSessionsForLogout(
+            String userId,
+            String accessToken
+    ) {
+        String url = adminBaseUrl()
+                + "/users/"
+                + encode(userId)
+                + "/sessions";
+
+        try {
+            return getJson(url, accessToken);
+        } catch (KeycloakAdminException e) {
+            if ("invalid_token".equals(e.getErrorCode())) {
+                throw userLoggedOutException();
+            }
+
+            throw e;
+        }
+    }
+
+    private boolean hasSession(
+            JsonNode sessions,
+            String sessionId
+    ) {
+        for (JsonNode session : sessions) {
+            if (sessionId.equals(session.path("id").asText())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private KeycloakAdminException userLoggedOutException() {
+        return new KeycloakAdminException(
+                HttpStatus.UNAUTHORIZED,
+                "user_loggedout",
+                "ログインしていません"
+        );
     }
 
     private void exchangeWithoutBody(
@@ -140,7 +216,7 @@ public class KeycloakAdminService {
                     Void.class
             );
         } catch (HttpStatusCodeException e) {
-            throw convertKeycloakError(e);
+            throw convertKeycloakError(e, LOGOUT_INVALID_MESSAGE);
         }
     }
 
@@ -161,9 +237,9 @@ public class KeycloakAdminService {
         }
 
         throw new KeycloakAdminException(
-                HttpStatus.NOT_FOUND,
-                "client_not_found",
-                "Keycloak client was not found"
+                HttpStatus.FORBIDDEN,
+                "permission_denied",
+                CLIENT_ROLES_PERMISSION_MESSAGE
         );
     }
 
@@ -188,7 +264,7 @@ public class KeycloakAdminService {
             return objectMapper.readTree(response.getBody());
 
         } catch (HttpStatusCodeException e) {
-            throw convertKeycloakError(e);
+            throw convertKeycloakError(e, AUTH_INVALID_MESSAGE);
 
         } catch (Exception e) {
             throw new KeycloakAdminException(
@@ -202,6 +278,13 @@ public class KeycloakAdminService {
 
     private KeycloakAdminException convertKeycloakError(
             HttpStatusCodeException e
+    ) {
+        return convertKeycloakError(e, AUTH_INVALID_MESSAGE);
+    }
+
+    private KeycloakAdminException convertKeycloakError(
+            HttpStatusCodeException e,
+            String invalidTokenMessage
     ) {
         if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
             return new KeycloakAdminException(
@@ -223,7 +306,7 @@ public class KeycloakAdminService {
             return new KeycloakAdminException(
                     HttpStatus.UNAUTHORIZED,
                     "invalid_token",
-                    "The authentication information required for logout is invalid."
+                    invalidTokenMessage
             );
         }
 
@@ -231,6 +314,22 @@ public class KeycloakAdminService {
                 HttpStatus.BAD_GATEWAY,
                 "keycloak_request_failed",
                 "Keycloak Admin API request failed"
+        );
+    }
+
+    private KeycloakAdminException clientRolesPermissionException() {
+        return new KeycloakAdminException(
+                HttpStatus.FORBIDDEN,
+                "permission_denied",
+                CLIENT_ROLES_PERMISSION_MESSAGE
+        );
+    }
+
+    private KeycloakAdminException userNotFoundException() {
+        return new KeycloakAdminException(
+                HttpStatus.NOT_FOUND,
+                "not_found",
+                USER_NOT_FOUND_MESSAGE
         );
     }
 
