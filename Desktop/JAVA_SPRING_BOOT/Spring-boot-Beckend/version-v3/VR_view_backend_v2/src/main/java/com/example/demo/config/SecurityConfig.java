@@ -89,7 +89,8 @@ public class SecurityConfig {
                         ).authenticated()
 
                         .requestMatchers(
-                                "/api/keycloak/me"
+                                "/api/keycloak/me",
+                                "/me"
                         ).authenticated()
 
                         .requestMatchers(

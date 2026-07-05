@@ -1,12 +1,16 @@
 package com.example.demo.controller;
 
 import com.example.demo.dto.ApiResponse;
+import com.example.demo.dto.LogoutRequest;
+import com.example.demo.service.CurrentUserResponseService;
 import com.example.demo.service.KeycloakAdminService;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -21,11 +25,14 @@ import java.util.Map;
 public class KeycloakController {
 
     private final KeycloakAdminService keycloakAdminService;
+    private final CurrentUserResponseService currentUserResponseService;
 
     public KeycloakController(
-            KeycloakAdminService keycloakAdminService
+            KeycloakAdminService keycloakAdminService,
+            CurrentUserResponseService currentUserResponseService
     ) {
         this.keycloakAdminService = keycloakAdminService;
+        this.currentUserResponseService = currentUserResponseService;
     }
 
     /*
@@ -33,25 +40,66 @@ public class KeycloakController {
      *
      * Caller sends:
      * - Authorization: Bearer ACCESS_TOKEN
+     * - Optional refresh_token in the JSON or form body
      *
-     * This uses the session id from the validated JWT when present.
+     * Access-token logout uses the backend's Keycloak client internally, so
+     * normal users do not need realm-management/manage-users.
      */
+    @PostMapping(
+            value = "/logout",
+            consumes = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ResponseEntity<ApiResponse<Void>> logoutJson(
+            @RequestHeader("Authorization") String authorizationHeader,
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody(required = false) LogoutRequest logoutRequest
+    ) {
+        return logout(
+                authorizationHeader,
+                jwt,
+                logoutRequest == null ? null : logoutRequest.getRefresh_token()
+        );
+    }
+
+    @PostMapping(
+            value = "/logout",
+            consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE
+    )
+    public ResponseEntity<ApiResponse<Void>> logoutForm(
+            @RequestHeader("Authorization") String authorizationHeader,
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(value = "refresh_token", required = false) String refreshToken
+    ) {
+        return logout(authorizationHeader, jwt, refreshToken);
+    }
+
     @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<Void>> logout(
+    public ResponseEntity<ApiResponse<Void>> logoutWithoutBody(
             @RequestHeader("Authorization") String authorizationHeader,
             @AuthenticationPrincipal Jwt jwt
     ) {
-        String accessToken = extractBearerToken(authorizationHeader);
+        return logout(authorizationHeader, jwt, null);
+    }
 
+    private ResponseEntity<ApiResponse<Void>> logout(
+            String authorizationHeader,
+            Jwt jwt,
+            String refreshToken
+    ) {
         if (jwt == null || jwt.getSubject() == null || jwt.getSubject().isBlank()) {
             throw new IllegalArgumentException("Authenticated user is required");
         }
 
-        keycloakAdminService.logoutCurrentSession(
-                jwt.getSubject(),
-                getFirstAvailableClaim(jwt, "sid", "session_state"),
-                accessToken
-        );
+        if (refreshToken == null || refreshToken.isBlank()) {
+            keycloakAdminService.logoutCurrentSessionWithServiceAccount(
+                    jwt.getSubject(),
+                    getFirstAvailableClaim(jwt, "sid", "session_state"),
+                    extractBearerToken(authorizationHeader),
+                    jwt.getExpiresAt()
+            );
+        } else {
+            keycloakAdminService.logoutWithRefreshToken(refreshToken);
+        }
 
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
@@ -124,24 +172,12 @@ public class KeycloakController {
      * Optional API: current user information from JWT.
      */
     @GetMapping("/me")
-    public ResponseEntity<ApiResponse<Map<String, String>>> me(
+    public ResponseEntity<ApiResponse<Map<String, Object>>> me(
             @AuthenticationPrincipal Jwt jwt
     ) {
-        Map<String, String> data = Map.of(
-                "user_id", jwt.getSubject(),
-                "username",
-                defaultValue(jwt.getClaimAsString("preferred_username")),
-                "email",
-                defaultValue(jwt.getClaimAsString("email")),
-                "name",
-                defaultValue(jwt.getClaimAsString("name"))
+        return ResponseEntity.ok(
+                ApiResponse.ok(currentUserResponseService.buildCurrentUserData(jwt))
         );
-
-        return ResponseEntity.ok(ApiResponse.ok(data));
-    }
-
-    private String defaultValue(String value) {
-        return value == null ? "" : value;
     }
 
     private String getFirstAvailableClaim(

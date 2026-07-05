@@ -8,16 +8,25 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class KeycloakAdminService {
@@ -25,16 +34,32 @@ public class KeycloakAdminService {
     private static final String AUTH_INVALID_MESSAGE = "認証情報が不正です";
     private static final String LOGOUT_INVALID_MESSAGE = "ログアウトに必要な認証情報が不正です";
     private static final String CLIENT_ROLES_PERMISSION_MESSAGE = "ロール一覧を取得する権限がありません";
+    private static final String USER_INFO_PERMISSION_MESSAGE = "ユーザー情報を取得する権限がありません";
     private static final String USER_NOT_FOUND_MESSAGE = "対象ユーザーが見つかりません";
+    private static final long DEFAULT_USED_REFRESH_TOKEN_TTL_SECONDS = 86_400L;
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final Map<String, Instant> usedRefreshTokens = new ConcurrentHashMap<>();
+    private final Map<String, Instant> usedAccessTokens = new ConcurrentHashMap<>();
 
     @Value("${keycloak.base-url}")
     private String keycloakBaseUrl;
 
     @Value("${keycloak.realm}")
     private String realm;
+
+    @Value("${keycloak.app-client-id}")
+    private String applicationClientId;
+
+    @Value("${keycloak.client-secret:}")
+    private String clientSecret;
+
+    @Value("${keycloak.admin-client-id:${keycloak.app-client-id}}")
+    private String adminClientId;
+
+    @Value("${keycloak.admin-client-secret:${keycloak.client-secret:}}")
+    private String adminClientSecret;
 
 
     @Autowired
@@ -106,6 +131,10 @@ public class KeycloakAdminService {
                 throw userNotFoundException();
             }
 
+            if ("permission_denied".equals(e.getErrorCode())) {
+                throw userInfoPermissionException();
+            }
+
             throw e;
         }
 
@@ -159,6 +188,192 @@ public class KeycloakAdminService {
         exchangeWithoutBody(url, HttpMethod.POST, accessToken);
     }
 
+    public void logoutCurrentSessionWithServiceAccount(
+            String userId,
+            String sessionId,
+            String accessToken,
+            Instant accessTokenExpiresAt
+    ) {
+        rejectAlreadyUsedAccessToken(accessToken);
+
+        logoutCurrentSession(
+                userId,
+                sessionId,
+                getServiceAccountAccessToken()
+        );
+
+        rememberUsedAccessToken(accessToken, accessTokenExpiresAt);
+    }
+
+    public void logoutWithRefreshToken(String refreshToken) {
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw invalidLogoutTokenException();
+        }
+
+        rejectAlreadyUsedRefreshToken(refreshToken);
+
+        String url = keycloakBaseUrl
+                + "/realms/"
+                + encode(realm)
+                + "/protocol/openid-connect/logout";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("client_id", applicationClientId);
+        form.add("refresh_token", refreshToken);
+
+        if (clientSecret != null && !clientSecret.isBlank()) {
+            form.add("client_secret", clientSecret);
+        }
+
+        try {
+            restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    new HttpEntity<>(form, headers),
+                    Void.class
+            );
+            rememberUsedRefreshToken(refreshToken);
+        } catch (HttpStatusCodeException e) {
+            if (e.getStatusCode() == HttpStatus.BAD_REQUEST
+                    || e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
+                throw invalidLogoutTokenException();
+            }
+
+            throw convertKeycloakError(e, LOGOUT_INVALID_MESSAGE);
+        }
+    }
+
+    private void rejectAlreadyUsedRefreshToken(String refreshToken) {
+        removeExpiredUsedRefreshTokens();
+
+        if (usedRefreshTokens.containsKey(tokenHash(refreshToken))) {
+            throw userLoggedOutException();
+        }
+    }
+
+    private void rejectAlreadyUsedAccessToken(String accessToken) {
+        removeExpiredUsedAccessTokens();
+
+        if (usedAccessTokens.containsKey(tokenHash(accessToken))) {
+            throw userLoggedOutException();
+        }
+    }
+
+    private String getServiceAccountAccessToken() {
+        if (adminClientSecret == null || adminClientSecret.isBlank()) {
+            throw invalidLogoutTokenException();
+        }
+
+        String url = keycloakBaseUrl
+                + "/realms/"
+                + encode(realm)
+                + "/protocol/openid-connect/token";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("grant_type", "client_credentials");
+        form.add("client_id", adminClientId);
+        form.add("client_secret", adminClientSecret);
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    new HttpEntity<>(form, headers),
+                    String.class
+            );
+
+            JsonNode json = objectMapper.readTree(response.getBody());
+            String accessToken = json.path("access_token").asText(null);
+
+            if (accessToken == null || accessToken.isBlank()) {
+                throw invalidLogoutTokenException();
+            }
+
+            return accessToken;
+        } catch (KeycloakAdminException e) {
+            throw e;
+        } catch (HttpStatusCodeException e) {
+            throw invalidLogoutTokenException();
+        } catch (Exception e) {
+            throw new KeycloakAdminException(
+                    HttpStatus.BAD_GATEWAY,
+                    "keycloak_request_failed",
+                    "Keycloak Admin API request failed"
+            );
+        }
+    }
+
+    private void rememberUsedRefreshToken(String refreshToken) {
+        usedRefreshTokens.put(
+                tokenHash(refreshToken),
+                refreshTokenExpiresAt(refreshToken)
+        );
+    }
+
+    private void removeExpiredUsedRefreshTokens() {
+        Instant now = Instant.now();
+        usedRefreshTokens.entrySet().removeIf(entry -> !entry.getValue().isAfter(now));
+    }
+
+    private void rememberUsedAccessToken(
+            String accessToken,
+            Instant expiresAt
+    ) {
+        usedAccessTokens.put(
+                tokenHash(accessToken),
+                expiresAt == null
+                        ? Instant.now().plusSeconds(DEFAULT_USED_REFRESH_TOKEN_TTL_SECONDS)
+                        : expiresAt
+        );
+    }
+
+    private void removeExpiredUsedAccessTokens() {
+        Instant now = Instant.now();
+        usedAccessTokens.entrySet().removeIf(entry -> !entry.getValue().isAfter(now));
+    }
+
+    private Instant refreshTokenExpiresAt(String refreshToken) {
+        String[] parts = refreshToken.split("\\.");
+
+        if (parts.length < 2) {
+            return Instant.now().plusSeconds(DEFAULT_USED_REFRESH_TOKEN_TTL_SECONDS);
+        }
+
+        try {
+            String payload = new String(
+                    Base64.getUrlDecoder().decode(parts[1]),
+                    StandardCharsets.UTF_8
+            );
+
+            JsonNode json = objectMapper.readTree(payload);
+            long expiresAtEpochSecond = json.path("exp").asLong(0L);
+
+            if (expiresAtEpochSecond > 0L) {
+                return Instant.ofEpochSecond(expiresAtEpochSecond);
+            }
+        } catch (Exception ignored) {
+            return Instant.now().plusSeconds(DEFAULT_USED_REFRESH_TOKEN_TTL_SECONDS);
+        }
+
+        return Instant.now().plusSeconds(DEFAULT_USED_REFRESH_TOKEN_TTL_SECONDS);
+    }
+
+    private String tokenHash(String token) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
     private JsonNode getUserSessionsForLogout(
             String userId,
             String accessToken
@@ -197,6 +412,14 @@ public class KeycloakAdminService {
                 HttpStatus.UNAUTHORIZED,
                 "user_loggedout",
                 "ログインしていません"
+        );
+    }
+
+    private KeycloakAdminException invalidLogoutTokenException() {
+        return new KeycloakAdminException(
+                HttpStatus.UNAUTHORIZED,
+                "invalid_token",
+                LOGOUT_INVALID_MESSAGE
         );
     }
 
@@ -270,7 +493,7 @@ public class KeycloakAdminService {
             throw new KeycloakAdminException(
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     "keycloak_request_failed",
-                    "Failed to call Keycloak Admin API"
+                    "Keycloak管理APIの呼び出しに失敗しました"
             );
         }
     }
@@ -290,7 +513,7 @@ public class KeycloakAdminService {
             return new KeycloakAdminException(
                     HttpStatus.NOT_FOUND,
                     "not_found",
-                    "Requested Keycloak resource was not found"
+                    "要求されたKeycloakリソースが見つかりません"
             );
         }
 
@@ -298,7 +521,7 @@ public class KeycloakAdminService {
             return new KeycloakAdminException(
                     HttpStatus.FORBIDDEN,
                     "permission_denied",
-                    "Token does not have Keycloak permission"
+                    "Keycloakの権限がありません"
             );
         }
 
@@ -313,7 +536,7 @@ public class KeycloakAdminService {
         return new KeycloakAdminException(
                 HttpStatus.BAD_GATEWAY,
                 "keycloak_request_failed",
-                "Keycloak Admin API request failed"
+                "Keycloak管理APIのリクエストに失敗しました"
         );
     }
 
@@ -330,6 +553,14 @@ public class KeycloakAdminService {
                 HttpStatus.NOT_FOUND,
                 "not_found",
                 USER_NOT_FOUND_MESSAGE
+        );
+    }
+
+    private KeycloakAdminException userInfoPermissionException() {
+        return new KeycloakAdminException(
+                HttpStatus.FORBIDDEN,
+                "permission_denied",
+                USER_INFO_PERMISSION_MESSAGE
         );
     }
 
