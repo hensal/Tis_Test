@@ -14,8 +14,14 @@ import java.util.Set;
 @Service
 public class CurrentUserResponseService {
 
+    private final KeycloakAdminService keycloakAdminService;
+
     @Value("${keycloak.app-client-id}")
     private String applicationClientId;
+
+    public CurrentUserResponseService(KeycloakAdminService keycloakAdminService) {
+        this.keycloakAdminService = keycloakAdminService;
+    }
 
     public Map<String, Object> buildCurrentUserData(Jwt jwt) {
         List<String> roles = extractRoles(jwt);
@@ -26,8 +32,12 @@ public class CurrentUserResponseService {
         data.put("user_name", resolveUserName(jwt));
         data.put("roles", roles);
         data.put("can_use_admin_mode", canUseAdminMode(roles));
-        data.put("created_at", null);
-        data.put("updated_at", null);
+        data.put(
+                "created_at",
+                keycloakAdminService.getUserCreatedAtWithServiceAccount(
+                        jwt.getSubject()
+                )
+        );
 
         return data;
     }

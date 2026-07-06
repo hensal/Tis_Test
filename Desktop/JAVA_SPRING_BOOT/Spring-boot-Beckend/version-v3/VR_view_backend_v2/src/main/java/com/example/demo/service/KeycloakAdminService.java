@@ -22,6 +22,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -37,6 +39,9 @@ public class KeycloakAdminService {
     private static final String USER_INFO_PERMISSION_MESSAGE = "ユーザー情報を取得する権限がありません";
     private static final String USER_NOT_FOUND_MESSAGE = "対象ユーザーが見つかりません";
     private static final long DEFAULT_USED_REFRESH_TOKEN_TTL_SECONDS = 86_400L;
+    private static final ZoneId RESPONSE_TIME_ZONE = ZoneId.of("Asia/Tokyo");
+    private static final DateTimeFormatter RESPONSE_DATE_TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("M/d/yyyy, h:mm:ss a");
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
@@ -156,6 +161,39 @@ public class KeycloakAdminService {
         );
     }
 
+    public String getUserCreatedAtWithServiceAccount(String userId) {
+        String url = adminBaseUrl()
+                + "/users/"
+                + encode(userId);
+
+        try {
+            JsonNode user = getJson(
+                    url,
+                    getServiceAccountAccessTokenForUserInfo()
+            );
+            long createdTimestamp = user.path("createdTimestamp").asLong(0L);
+
+            if (createdTimestamp <= 0L) {
+                return null;
+            }
+
+            return RESPONSE_DATE_TIME_FORMATTER.format(
+                    Instant.ofEpochMilli(createdTimestamp)
+                            .atZone(RESPONSE_TIME_ZONE)
+            );
+        } catch (KeycloakAdminException e) {
+            if ("not_found".equals(e.getErrorCode())) {
+                throw userNotFoundException();
+            }
+
+            if ("permission_denied".equals(e.getErrorCode())) {
+                throw userInfoPermissionException();
+            }
+
+            throw e;
+        }
+    }
+
     public void logoutCurrentSession(
             String userId,
             String sessionId,
@@ -199,7 +237,7 @@ public class KeycloakAdminService {
         logoutCurrentSession(
                 userId,
                 sessionId,
-                getServiceAccountAccessToken()
+                getServiceAccountAccessTokenForLogout()
         );
 
         rememberUsedAccessToken(accessToken, accessTokenExpiresAt);
@@ -262,9 +300,19 @@ public class KeycloakAdminService {
         }
     }
 
-    private String getServiceAccountAccessToken() {
+    private String getServiceAccountAccessTokenForLogout() {
+        return getServiceAccountAccessToken(invalidLogoutTokenException());
+    }
+
+    private String getServiceAccountAccessTokenForUserInfo() {
+        return getServiceAccountAccessToken(userInfoPermissionException());
+    }
+
+    private String getServiceAccountAccessToken(
+            KeycloakAdminException authException
+    ) {
         if (adminClientSecret == null || adminClientSecret.isBlank()) {
-            throw invalidLogoutTokenException();
+            throw authException;
         }
 
         String url = keycloakBaseUrl
@@ -292,19 +340,19 @@ public class KeycloakAdminService {
             String accessToken = json.path("access_token").asText(null);
 
             if (accessToken == null || accessToken.isBlank()) {
-                throw invalidLogoutTokenException();
+                throw authException;
             }
 
             return accessToken;
         } catch (KeycloakAdminException e) {
             throw e;
         } catch (HttpStatusCodeException e) {
-            throw invalidLogoutTokenException();
+            throw authException;
         } catch (Exception e) {
             throw new KeycloakAdminException(
                     HttpStatus.BAD_GATEWAY,
                     "keycloak_request_failed",
-                    "Keycloak Admin API request failed"
+                    "Keycloak管理APIのリクエストに失敗しました"
             );
         }
     }

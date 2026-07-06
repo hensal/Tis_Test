@@ -1,6 +1,7 @@
 package com.example.demo.exception;
 
 import com.example.demo.dto.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingRequestHeaderException;
@@ -27,13 +28,24 @@ public class GlobalExceptionHandler {
             MissingRequestHeaderException.class
     })
     public ResponseEntity<ApiResponse<Void>> handleInvalidRequest(
-            Exception exception
+            Exception exception,
+            HttpServletRequest request
     ) {
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(ApiResponse.error(
                         "invalid_token",
-                        "ログアウトに必要な認証情報が不正です"
+                        invalidTokenMessage(request)
                 ));
+    }
+
+    private String invalidTokenMessage(HttpServletRequest request) {
+        String requestUri = request.getRequestURI();
+
+        if (requestUri != null && requestUri.endsWith("/logout")) {
+            return "ログアウトに必要な認証情報が不正です";
+        }
+
+        return "認証情報が不正です";
     }
 }
