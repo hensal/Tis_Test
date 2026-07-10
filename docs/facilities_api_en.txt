@@ -1,0 +1,386 @@
+# Facilities API Design - English Version
+
+## Overview
+
+This API manages facilities.
+
+It supports:
+- Getting a facility list
+- Getting facility details
+- Creating a facility
+- Updating a facility
+- Deleting a facility
+- Moving a facility
+- Copying a facility
+- Getting display HTML
+- Getting VRView display information
+
+In the current database design, the main facilities table stores the facility tree structure, publish settings, and basic attributes.
+
+Related information such as images, maps, map positions, permissions, equipment, and annotations is fetched from related tables.
+
+
+## Endpoint List
+
+| Operation | Method | URL Example | Description |
+|---|---|---|---|
+| List facilities | GET | /facilities | Get facilities matching conditions |
+| Get details | GET | /facilities/{facilityId} | Get facility details |
+| Get display HTML | GET | /facilities/{facilityId}/view-html | Get HTML for display |
+| Create | POST | /facilities | Create a facility |
+| Update | PUT | /facilities/{facilityId} | Update a facility |
+| Delete | DELETE | /facilities/{facilityId} | Delete a facility |
+| Move | POST | /facilities/{facilityId}/move | Move a facility |
+| Copy | POST | /facilities/{facilityId}/copy | Copy a facility |
+| Get VRView data | GET | /facilities/{facilityId}/vr-view | Get VRView display data |
+
+
+## Parameter Definitions
+
+### Facility Basic Information
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| facility_id | BIGINT | Yes | Facility ID. Auto-generated. |
+| parent_id | BIGINT | No | Parent facility ID. Root facility is null. |
+| facility_name | VARCHAR(256) | Yes | Facility name. |
+| tree_level | INT | No | Tree hierarchy level. |
+| is_leaf | BOOLEAN | No | Whether this facility is a leaf node. |
+| publish_mode | VARCHAR(32) | No | Publish mode. Examples: private, public_self, public_children. |
+| is_outdoor | BOOLEAN | No | Whether the facility is outdoor. |
+| detail | TEXT | No | Facility node detail. |
+| has_permission | BOOLEAN | No | UI helper value for whether individual permissions are set in the facility management screen. |
+| created_at | DATETIME | No | Created datetime, format: yyyy/MM/dd HH:mm:ss JST. |
+| updated_at | DATETIME | No | Updated datetime, format: yyyy/MM/dd HH:mm:ss JST. |
+| deleted_at | DATETIME | No | Deleted datetime, format: yyyy/MM/dd HH:mm:ss JST. |
+
+
+### Related Items Returned by Joins
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| images | ARRAY | No | Images under the facility. Fetched from images table. |
+| maps | ARRAY | No | Maps under the facility. Fetched from maps table. |
+| map_points | ARRAY | No | Positions on maps. Fetched from map_points table. |
+| roles | ARRAY | No | Facility permissions. Fetched from facility_role_permissions table. |
+| equipments | ARRAY | No | Equipment list. Fetched from equipment / equipment_masters tables. |
+| annotations | ARRAY | No | Annotation list. Fetched from annotations table. |
+| has_vr_image | BOOLEAN | No | UI helper value derived from whether related VR image data exists. |
+| has_emergency_annotation | BOOLEAN | No | UI helper value derived from whether emergency annotations exist. |
+| has_normal_annotation | BOOLEAN | No | UI helper value derived from whether normal annotations exist. |
+| has_equipment | BOOLEAN | No | UI helper value derived from whether equipment data exists. |
+
+
+### Image Element
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| image_id | BIGINT | Yes | Image ID. |
+| file_id | BIGINT | Yes | File ID. |
+| image_name | VARCHAR(256) | No | Image name. |
+| shooting_height_m | DECIMAL(6,3) | No | Height from floor to camera center, in meters. |
+| ceiling_height_m | DECIMAL(6,3) | No | Height from floor to ceiling, in meters. |
+
+
+### Facility List Search Conditions
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| parentId | BIGINT | No | If specified, get direct child facilities under this parent. |
+| keyword | VARCHAR(256) | No | Partial match search by facility name. |
+
+
+### Display HTML
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| facilityId | BIGINT | Yes | Target facility ID specified in the path. |
+| content_html | TEXT | No | HTML body for display. Response field. |
+| updated_at | DATETIME | No | HTML updated datetime, format: yyyy/MM/dd HH:mm:ss JST. Response field. |
+
+
+### Move Facility
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| facilityId | BIGINT | Yes | Source facility ID specified in the path. |
+| target_facility_id | BIGINT | Yes | Destination facility ID. After moving, the source facility is placed as a child of this facility. |
+
+
+### Copy Facility
+
+| Parameter | Type | Required | Notes |
+|---|---|---|---|
+| facilityId | BIGINT | Yes | Source facility ID specified in the path. |
+| target_facility_id | BIGINT | Yes | Destination facility ID. After copying, the copied facility is placed as a child of this facility. |
+
+
+## Request Examples
+
+### Get Direct Child Facilities
+
+GET /facilities?parentId=100
+
+
+### Search Facilities
+
+GET /facilities?keyword=管理棟
+
+
+### Get Facility Details
+
+GET /facilities/1001
+
+
+### Get Display HTML
+
+GET /facilities/1001/view-html
+
+
+### Create Facility
+
+{
+  "parent_id": 100,
+  "facility_name": "第1会議室",
+  "publish_mode": "public_self",
+  "is_outdoor": false,
+  "detail": "会議室ノード"
+}
+
+
+### Update Facility
+
+{
+  "facility_name": "第1会議室-更新",
+  "publish_mode": "public_children",
+  "is_outdoor": false,
+  "detail": "会議室ノード更新"
+}
+
+
+### Move Facility
+
+{
+  "target_facility_id": 200
+}
+
+
+### Copy Facility
+
+{
+  "target_facility_id": 300
+}
+
+
+## Response Examples
+
+### Get Details Response
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1001,
+    "parent_id": 100,
+    "facility_name": "第1会議室",
+    "tree_level": 3,
+    "is_leaf": true,
+    "publish_mode": "public_self",
+    "is_outdoor": false,
+    "detail": "会議室ノード",
+    "has_permission": true,
+    "images": [
+      {
+        "image_id": 501,
+        "file_id": 5001,
+        "image_name": "会議室VR",
+        "shooting_height_m": 1.600,
+        "ceiling_height_m": 2.700
+      }
+    ],
+    "maps": [
+      {
+        "map_id": 601,
+        "file_id": 6001,
+        "map_name": "3F平面図"
+      }
+    ],
+    "map_points": [
+      {
+        "map_point_id": 701,
+        "map_id": 601,
+        "x_coord": 120.5,
+        "y_coord": 230.0
+      }
+    ],
+    "roles": [
+      {
+        "keycloak_role_id": "8c1b1111-2222-3333-4444-abcdef123456",
+        "keycloak_role_name": "admin",
+        "permission_code": "equipment_view"
+      }
+    ],
+    "equipments": [
+      {
+        "equipment_id": 1,
+        "equipment_name": "室外機A",
+        "vr_x": 0.3456,
+        "vr_y": 0.7890
+      }
+    ],
+    "annotations": [
+      {
+        "annotation_id": 1,
+        "title": "点検依頼"
+      }
+    ],
+    "has_vr_image": true,
+    "has_emergency_annotation": false,
+    "has_normal_annotation": true,
+    "has_equipment": true,
+    "created_at": "2026/03/27 10:00:00",
+    "updated_at": "2026/03/27 10:30:00",
+    "deleted_at": null
+  }
+}
+
+
+### List Response
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": [
+    {
+      "facility_id": 1001,
+      "parent_id": 100,
+      "facility_name": "第1会議室",
+      "publish_mode": "public_self",
+      "is_outdoor": false,
+      "has_vr_image": true,
+      "has_emergency_annotation": false,
+      "has_normal_annotation": true,
+      "has_equipment": true,
+      "created_at": "2026/03/27 10:00:00",
+      "updated_at": "2026/03/27 10:30:00",
+      "deleted_at": null
+    }
+  ]
+}
+
+
+### Display HTML Response
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1001,
+    "content_html": "<h1>第1会議室</h1><p>会議室ノード</p>",
+    "updated_at": "2026/03/27 10:30:00"
+  }
+}
+
+
+### VRView Display Data Response
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1001,
+    "facility_name": "第1会議室",
+    "has_vr_image": true,
+    "vr_image": {
+      "file_id": 5001,
+      "url": "/files/5001",
+      "shooting_height_m": 1.600,
+      "ceiling_height_m": 2.700
+    },
+    "move_points": [
+      {
+        "facility_id": 1002,
+        "facility_name": "第2会議室",
+        "vr_x": 0.1234,
+        "vr_y": 0.5678
+      }
+    ],
+    "annotation_points": [
+      {
+        "annotation_id": 1,
+        "annotation_type": "normal",
+        "title": "点検依頼",
+        "vr_x": 0.2222,
+        "vr_y": 0.3333
+      }
+    ],
+    "equipment_points": [
+      {
+        "equipment_id": 1,
+        "equipment_name": "室外機A",
+        "vr_x": 0.4444,
+        "vr_y": 0.5555
+      }
+    ],
+    "mini_map": {
+      "file_id": 6001,
+      "url": "/files/6001",
+      "map_points": [
+        {
+          "facility_id": 1002,
+          "facility_name": "第2会議室",
+          "x": 120.5,
+          "y": 230.0
+        }
+      ]
+    }
+  }
+}
+
+
+## Error Response Example
+
+{
+  "success": false,
+  "error_code": "conflict",
+  "message": "The target data has been updated by another user.",
+  "errors": null,
+  "data": null
+}
+
+
+## Authorization
+
+- Only logged-in users can use these APIs.
+- List, detail, display HTML, and VRView APIs can be used only by users who have view permission for the target facility.
+- Create, update, delete, move, and copy APIs can be used only by users who have management permission for the target facility.
+- Users without a management role cannot execute management operations.
+
+
+## Notes
+
+- GET /facilities is used in two ways:
+  - If parentId is specified, it returns direct child facilities.
+  - If keyword is specified, it searches facilities.
+- GET /facilities/{facilityId} is for detailed information used in editing.
+- GET /facilities/{facilityId}/view-html is a lightweight API for display.
+- Logically deleted facilities are not returned by list, detail, display HTML, or VRView APIs.
+- In the facility tree screen, facilities for which the user has no permission are not returned.
+- Image information is fetched from images.
+- Map information is fetched from maps.
+- Map positions are fetched from map_points.
+- Facility images may store shooting_height_m and ceiling_height_m in meters.
+- Facility image and map image registration/replacement is expected to use file IDs uploaded beforehand through POST /files.
+- The VRView mini map is expected to display the current facility and sibling facility positions based on map_points.
+- Permission information is fetched from facility_role_permissions.
+- Each roles element is represented by a combination of keycloak_role_id and permission_code.
+- roles, equipments, and annotations do not need to be stored directly in the facilities table. They may be returned by joining related tables.
+- Display helper values such as whether images, annotations, or equipment exist may be derived from related data.
+- For move and copy:
+  - The source facility is specified by the path facilityId.
+  - The destination facility is specified by body target_facility_id.
+- If the admin screen uses bulk save for facility editing, related edit contents may be saved together in the facility update API.
