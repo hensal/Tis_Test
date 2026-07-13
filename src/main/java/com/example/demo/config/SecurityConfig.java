@@ -94,6 +94,10 @@ public class SecurityConfig {
                         ).authenticated()
 
                         .requestMatchers(
+                                "/files/**"
+                        ).authenticated()
+
+                        .requestMatchers(
                                 "/facilities/**"
                         ).hasAuthority("ROLE_SYS_ADMIN")
 
