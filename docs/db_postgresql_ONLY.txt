@@ -57,12 +57,9 @@ CREATE TABLE IF NOT EXISTS files (
     file_id BIGSERIAL PRIMARY KEY,
     file_name VARCHAR(128) NOT NULL,
     file_path VARCHAR(256),
-    file_type VARCHAR(64) NOT NULL,
+    file_type VARCHAR(32) NOT NULL,
     file_size BIGINT NOT NULL,
-    storage_type VARCHAR(32) NOT NULL,
-    external_file_id VARCHAR(128),
-    external_url VARCHAR(256),
-    external_bucket VARCHAR(128),
+    s3_bucket VARCHAR(512) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMPTZ
 );
@@ -207,12 +204,11 @@ INSERT INTO files (
     file_path,
     file_type,
     file_size,
-    storage_type,
-    external_url
+    s3_bucket
 )
 VALUES
-('meeting-room-vr.jpg', '/dummy/images/meeting-room-vr.jpg', 'image/jpeg', 1024000, 'local', NULL),
-('floor-map-3f.png', '/dummy/maps/floor-map-3f.png', 'image/png', 512000, 'local', NULL);
+('meeting-room-vr.jpg', '/1', 'vr_image', 1024000, 'http://localhost:9000/vr-view-bucket'),
+('floor-map-3f.png', '/2', 'map_image', 512000, 'http://localhost:9000/vr-view-bucket');
 
 INSERT INTO facility_images (
     facility_id,

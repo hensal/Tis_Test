@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 
 @Service
 public class FilesService {
@@ -74,7 +73,7 @@ public class FilesService {
         String contentType = defaultContentType(multipartFile.getContentType());
         Long fileId = createFileRecord(originalFileName, fileType.trim(), multipartFile.getSize());
         String filePath = "/" + fileId;
-        String objectName = fileId + "/" + UUID.randomUUID();
+        String objectName = fileId + "/" + originalFileName;
 
         try {
             ensureBucketExists();
@@ -92,16 +91,10 @@ public class FilesService {
             );
             jdbcTemplate.update("""
                     UPDATE files
-                       SET file_path = ?,
-                           external_file_id = ?,
-                           external_url = ?,
-                           external_bucket = ?
+                       SET file_path = ?
                      WHERE file_id = ?
                     """,
                     filePath,
-                    objectName,
-                    minioEndpoint + "/" + minioBucket + "/" + objectName,
-                    getS3BucketUrl(),
                     fileId
             );
         } catch (Exception exception) {
@@ -121,7 +114,7 @@ public class FilesService {
         validateDownloadPermission(file, userRoles);
 
         String bucket = minioBucket;
-        String objectName = file.externalFileId() == null ? file.filePath() : file.externalFileId();
+        String objectName = toObjectName(file);
 
         if (objectName == null || objectName.isBlank()) {
             throw new KeycloakAdminException(
@@ -279,11 +272,10 @@ public class FilesService {
                             file_path,
                             file_type,
                             file_size,
-                            storage_type,
-                            external_bucket,
+                            s3_bucket,
                             created_at
                         )
-                        VALUES (?, '', ?, ?, 'minio', ?, CURRENT_TIMESTAMP)
+                        VALUES (?, '', ?, ?, ?, CURRENT_TIMESTAMP)
                         """, new String[]{"file_id"});
                 ps.setString(1, originalFileName);
                 ps.setString(2, fileType);
@@ -309,10 +301,7 @@ public class FilesService {
                        file_path,
                        file_type,
                        file_size,
-                       storage_type,
-                       external_file_id,
-                       external_url,
-                       external_bucket,
+                       s3_bucket,
                        created_at
                   FROM files
                  WHERE file_id = ?
@@ -323,10 +312,7 @@ public class FilesService {
                 rs.getString("file_path"),
                 rs.getString("file_type"),
                 rs.getLong("file_size"),
-                rs.getString("storage_type"),
-                rs.getString("external_file_id"),
-                rs.getString("external_url"),
-                rs.getString("external_bucket"),
+                rs.getString("s3_bucket"),
                 toLocalDateTime(rs.getTimestamp("created_at"))
         ), fileId);
 
@@ -348,7 +334,7 @@ public class FilesService {
         data.put("file_path", file.filePath());
         data.put("file_type", file.fileType());
         data.put("file_size", file.fileSize());
-        data.put("s3_bucket", file.externalBucket() == null ? getS3BucketUrl() : file.externalBucket());
+        data.put("s3_bucket", file.s3Bucket() == null ? getS3BucketUrl() : file.s3Bucket());
         data.put("created_at", format(file.createdAt()));
         return data;
     }
@@ -424,16 +410,27 @@ public class FilesService {
         return minioEndpoint + "/" + minioBucket;
     }
 
+    private String toObjectName(StoredFile file) {
+        String directory = file.filePath() == null ? "" : file.filePath().trim();
+
+        if (directory.startsWith("/")) {
+            directory = directory.substring(1);
+        }
+
+        if (directory.isBlank()) {
+            return file.fileName();
+        }
+
+        return directory + "/" + file.fileName();
+    }
+
     public record StoredFile(
             Long fileId,
             String fileName,
             String filePath,
             String fileType,
             Long fileSize,
-            String storageType,
-            String externalFileId,
-            String externalUrl,
-            String externalBucket,
+            String s3Bucket,
             LocalDateTime createdAt
     ) {
     }
