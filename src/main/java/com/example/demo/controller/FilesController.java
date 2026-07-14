@@ -3,12 +3,11 @@ package com.example.demo.controller;
 import com.example.demo.dto.ApiResponse;
 import com.example.demo.exception.KeycloakAdminException;
 import com.example.demo.service.FilesService;
-import com.example.demo.service.FilesService.StoredFile;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,8 +17,11 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/files")
@@ -33,43 +35,41 @@ public class FilesController {
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<Map<String, Object>>> upload(
-            @RequestParam(value = "file", required = false) MultipartFile file
+            @RequestParam(value = "file", required = false) MultipartFile file,
+            @RequestParam(value = "file_type", required = false) String fileType
     ) {
+        Map<String, List<String>> errors = new LinkedHashMap<>();
+
         if (file == null || file.isEmpty()) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(new ApiResponse<>(
-                            false,
-                            "validation_error",
-                            "アップロード対象ファイルが指定されていません",
-                            Map.of("file", List.of("この項目は必須です")),
-                            null
-                    ));
+            errors.put("file", List.of("この項目は必須です"));
         }
 
-        return ResponseEntity.ok(ApiResponse.ok(filesService.upload(file)));
+        if (!filesService.isSupportedFileType(fileType)) {
+            errors.put("file_type", List.of("annotation、vr_image、map_image のいずれかを指定してください"));
+        }
+
+        if (!errors.isEmpty()) {
+            return ResponseEntity.badRequest().body(new ApiResponse<>(
+                    false,
+                    "validation_error",
+                    "リクエストパラメータが不正です",
+                    errors,
+                    null
+            ));
+        }
+
+        return ResponseEntity.ok(ApiResponse.ok(filesService.upload(file, fileType)));
     }
 
     @GetMapping("/{fileId}")
-    public ResponseEntity<?> getFile(
-            @PathVariable String fileId
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getFile(
+            @PathVariable String fileId,
+            Authentication authentication
     ) {
-        StoredFile file = filesService.getFile(parseFileId(fileId));
-        MediaType mediaType = parseMediaType(file.fileType());
-        String dispositionType = isBrowserDisplayable(mediaType) ? "inline" : "attachment";
-
-        return ResponseEntity.ok()
-                .contentType(mediaType)
-                .contentLength(file.fileSize())
-                .header(
-                        HttpHeaders.CONTENT_DISPOSITION,
-                        ContentDisposition
-                                .builder(dispositionType)
-                                .filename(file.fileName(), StandardCharsets.UTF_8)
-                                .build()
-                                .toString()
-                )
-                .body(file.resource());
+        return ResponseEntity.ok(ApiResponse.ok(filesService.getDownloadUrl(
+                parseFileId(fileId),
+                extractRoleNames(authentication)
+        )));
     }
 
     private Long parseFileId(String fileId) {
@@ -87,25 +87,25 @@ public class FilesController {
         }
     }
 
-    private MediaType parseMediaType(String fileType) {
-        try {
-            return MediaType.parseMediaType(fileType);
-        } catch (Exception exception) {
-            return MediaType.APPLICATION_OCTET_STREAM;
-        }
-    }
-
-    private boolean isBrowserDisplayable(MediaType mediaType) {
-        return mediaType.getType().equals("image")
-                || MediaType.APPLICATION_PDF.equals(mediaType)
-                || mediaType.getType().equals("text");
-    }
-
     private KeycloakAdminException invalidRequest() {
         return new KeycloakAdminException(
                 HttpStatus.BAD_REQUEST,
                 "invalid_request",
                 "リクエストパラメータが不正です"
         );
+    }
+
+    private Set<String> extractRoleNames(Authentication authentication) {
+        if (authentication == null) {
+            return Set.of();
+        }
+
+        return authentication.getAuthorities()
+                .stream()
+                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.startsWith("ROLE_")
+                        ? authority.substring("ROLE_".length())
+                        : authority)
+                .collect(Collectors.toSet());
     }
 }

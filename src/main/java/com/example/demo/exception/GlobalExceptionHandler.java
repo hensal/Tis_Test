@@ -4,6 +4,7 @@ import com.example.demo.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -36,6 +37,16 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(
                         "invalid_token",
                         invalidTokenMessage(request)
+                ));
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnsupportedMediaType() {
+        return ResponseEntity
+                .status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(ApiResponse.error(
+                        "validation_error",
+                        "リクエストパラメータが不正です"
                 ));
     }
 
