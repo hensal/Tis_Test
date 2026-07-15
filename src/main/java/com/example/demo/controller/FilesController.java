@@ -72,6 +72,15 @@ public class FilesController {
         )));
     }
 
+    @GetMapping
+    public ResponseEntity<ApiResponse<Void>> missingFileId() {
+        throw new KeycloakAdminException(
+                HttpStatus.NOT_FOUND,
+                "not_found",
+                "対象ファイルが見つかりません"
+        );
+    }
+
     private Long parseFileId(String fileId) {
         if (fileId == null
                 || fileId.isBlank()
