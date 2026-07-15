@@ -1,0 +1,583 @@
+Files API Non-SYS_ADMIN Download Permission Test Guide
+======================================================
+
+Purpose
+-------
+This guide explains how to prepare PostgreSQL test data and test these Excel cases:
+
+1. file_type = map_image
+   Case: Referencing a file_id without a reference role.
+
+2. file_type = vr_image
+   Case: Referencing a file_id without a reference role.
+
+3. file_type = annotation
+   Case: Referencing a file_id without a reference role.
+
+The API behavior should be:
+
+- If permission count is 0:
+  {
+    "success": false,
+    "error_code": "permission_denied",
+    "message": "ファイルを取得する権限がありません",
+    "errors": null,
+    "data": null
+  }
+
+- If permission count is 1 or more:
+  {
+    "success": true,
+    "error_code": null,
+    "message": "ok",
+    "data": {
+      "file_id": 1,
+      "file_url": "...signed MinIO URL...",
+      "file_name": "...",
+      "file_type": "...",
+      "file_size": 123,
+      "created_at": "...",
+      "expires_at": "..."
+    }
+  }
+
+
+Important Concept
+-----------------
+The user is non-SYS_ADMIN.
+
+The user has this Keycloak client role:
+
+  viewer
+
+The API reads the user role from the access token. Therefore, after assigning the role in Keycloak, always get a new access token.
+
+For this guide, the database role value must match the token role exactly:
+
+  facility_role_permission.keycloak_role_id = 'viewer'
+
+
+Required MinIO Setup
+--------------------
+Start MinIO before testing:
+
+Mac:
+
+  minio server ~/minio-data --address ":9000" --console-address ":9001"
+
+Windows:
+
+  minio.exe server --address :9000 --console-address :9001 data
+
+Application setting must use API port 9000:
+
+  minio.endpoint=http://localhost:9000
+  minio.bucket=vr-view-bucket
+
+The console/browser URL is port 9001. Do not use 9001 in Spring Boot config.
+
+
+Required Keycloak Setup
+-----------------------
+1. Open Keycloak Admin Console.
+2. Select realm:
+
+     pygmalion_viewer
+
+3. Open user:
+
+     user03
+
+4. Assign client role under TestClient:
+
+     viewer
+
+5. Get a new access token after assigning the role.
+6. Confirm:
+
+   GET http://localhost:8081/api/keycloak/me
+
+   Response roles should include:
+
+     "viewer"
+
+
+Create Required PostgreSQL Tables
+---------------------------------
+Run this SQL inside database:
+
+  vr_view_db
+
+If tables already exist, this SQL will not recreate them.
+
+------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS facilities_tree (
+    facility_id BIGSERIAL PRIMARY KEY,
+    parent_id BIGINT REFERENCES facilities_tree(facility_id),
+    node_name VARCHAR(128) NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 10,
+    tree_level INTEGER,
+    is_leaf BOOLEAN NOT NULL DEFAULT TRUE,
+    public_flag CHAR(2) NOT NULL DEFAULT '01',
+    outer_flag BOOLEAN NOT NULL DEFAULT FALSE,
+    node_description VARCHAR(1000),
+    authority_setting_flg BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS files (
+    file_id BIGSERIAL PRIMARY KEY,
+    file_name VARCHAR(128) NOT NULL,
+    file_path VARCHAR(256),
+    file_type VARCHAR(32) NOT NULL,
+    file_size BIGINT NOT NULL,
+    s3_bucket VARCHAR(512) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS maps (
+    map_id BIGSERIAL PRIMARY KEY,
+    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
+    file_id BIGINT NOT NULL REFERENCES files(file_id),
+    map_name VARCHAR(256) NOT NULL,
+    image_width INTEGER NOT NULL,
+    image_height INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS facility_images (
+    image_id BIGSERIAL PRIMARY KEY,
+    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
+    file_id BIGINT NOT NULL REFERENCES files(file_id),
+    image_name VARCHAR(256) NOT NULL,
+    shooting_height_m DECIMAL(6,3) NOT NULL,
+    ceiling_height_m DECIMAL(6,3) NOT NULL,
+    guid VARCHAR(64) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS annotations (
+    annotation_id BIGSERIAL PRIMARY KEY,
+    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
+    yaw DOUBLE PRECISION,
+    pitch DOUBLE PRECISION,
+    annotation_type CHAR(2) NOT NULL DEFAULT '01',
+    annotation_title VARCHAR(256) NOT NULL,
+    annotation_content TEXT,
+    display_expire_type VARCHAR(16),
+    display_expire_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(128) NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS annotation_files (
+    annotation_file_id BIGSERIAL PRIMARY KEY,
+    annotation_id BIGINT NOT NULL REFERENCES annotations(annotation_id),
+    file_id BIGINT NOT NULL REFERENCES files(file_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS permission_master (
+    permission_id BIGSERIAL PRIMARY KEY,
+    permission_name VARCHAR(128) NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS facility_role_permission (
+    facility_role_permission_id BIGSERIAL PRIMARY KEY,
+    permission_id BIGINT NOT NULL REFERENCES permission_master(permission_id),
+    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
+    keycloak_role_id VARCHAR(64) NOT NULL,
+    keycloak_role_name VARCHAR(128) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ
+);
+
+------------------------------------------------------------
+
+
+Insert Base Test Data
+---------------------
+This creates:
+
+- root facility
+- child facility
+- grandchild facility used by map_image test
+- one file for each file_type
+- relation rows for maps, facility_images, annotations, annotation_files
+- permission rows
+
+Run all SQL below.
+
+------------------------------------------------------------
+
+TRUNCATE TABLE
+    facility_role_permission,
+    permission_master,
+    annotation_files,
+    annotations,
+    facility_images,
+    maps,
+    files,
+    facilities_tree
+RESTART IDENTITY CASCADE;
+
+INSERT INTO facilities_tree (
+    facility_id,
+    parent_id,
+    node_name,
+    sort_order,
+    tree_level,
+    is_leaf,
+    public_flag,
+    outer_flag,
+    node_description,
+    authority_setting_flg
+)
+VALUES
+(1, NULL, 'root facility', 10, 1, FALSE, '03', FALSE, 'root for test', TRUE),
+(2, 1, 'child facility', 10, 2, FALSE, '02', FALSE, 'child for test', TRUE),
+(3, 2, 'map permission child facility', 10, 3, TRUE, '02', FALSE, 'used by map_image permission SQL', TRUE);
+
+INSERT INTO files (
+    file_id,
+    file_name,
+    file_path,
+    file_type,
+    file_size,
+    s3_bucket
+)
+VALUES
+(101, 'test-map.png', '/101', 'map_image', 1000, 'http://localhost:9000/vr-view-bucket'),
+(102, 'test-vr.jpg', '/102', 'vr_image', 2000, 'http://localhost:9000/vr-view-bucket'),
+(103, 'test-annotation.pdf', '/103', 'annotation', 3000, 'http://localhost:9000/vr-view-bucket');
+
+-- map_image relation.
+-- Current Excel/code SQL checks: maps.facility_id = facilities_tree.parent_id.
+-- Therefore maps.facility_id = 2 will match facilities_tree row facility_id = 3, parent_id = 2.
+INSERT INTO maps (
+    map_id,
+    facility_id,
+    file_id,
+    map_name,
+    image_width,
+    image_height
+)
+VALUES
+(101, 2, 101, 'test map', 1920, 1080);
+
+-- vr_image relation.
+INSERT INTO facility_images (
+    image_id,
+    facility_id,
+    file_id,
+    image_name,
+    shooting_height_m,
+    ceiling_height_m,
+    guid
+)
+VALUES
+(102, 2, 102, 'test vr image', 1.600, 2.700, 'test-guid-102');
+
+-- annotation relation.
+INSERT INTO annotations (
+    annotation_id,
+    facility_id,
+    yaw,
+    pitch,
+    annotation_type,
+    annotation_title,
+    annotation_content,
+    created_by
+)
+VALUES
+(103, 2, 0.1, 0.2, '01', 'test annotation', 'annotation file permission test', 'tester');
+
+INSERT INTO annotation_files (
+    annotation_file_id,
+    annotation_id,
+    file_id
+)
+VALUES
+(103, 103, 103);
+
+INSERT INTO permission_master (
+    permission_id,
+    permission_name
+)
+VALUES
+(20, 'vr_image_view'),
+(30, 'annotation_view'),
+(40, 'annotation_manage');
+
+------------------------------------------------------------
+
+
+Test Case 1: map_image Without Reference Role
+---------------------------------------------
+File:
+
+  file_id = 101
+  file_type = map_image
+
+Before inserting permission, this SQL should return 0:
+
+SELECT COUNT(*) AS permission_count
+FROM maps m
+JOIN facilities_tree ft
+  ON m.facility_id = ft.parent_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+JOIN permission_master pm
+  ON pm.permission_id = frp.permission_id
+WHERE m.file_id = 101
+  AND pm.permission_name = 'vr_image_view'
+  AND frp.keycloak_role_id IN ('viewer')
+  AND ft.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+  AND pm.deleted_at IS NULL
+  AND m.deleted_at IS NULL;
+
+Expected API result with user03/viewer token:
+
+GET http://localhost:8081/files/101
+
+{
+  "success": false,
+  "error_code": "permission_denied",
+  "message": "ファイルを取得する権限がありません",
+  "errors": null,
+  "data": null
+}
+
+Now insert permission:
+
+INSERT INTO facility_role_permission (
+    permission_id,
+    facility_id,
+    keycloak_role_id,
+    keycloak_role_name
+)
+VALUES
+(20, 3, 'viewer', 'viewer');
+
+Run the count SQL again. It should return 1.
+
+Expected API result:
+
+GET http://localhost:8081/files/101
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "file_id": 101,
+    "file_url": "...",
+    "file_name": "test-map.png",
+    "file_type": "map_image",
+    "file_size": 1000,
+    "created_at": "...",
+    "expires_at": "..."
+  }
+}
+
+
+Test Case 2: vr_image Without Reference Role
+--------------------------------------------
+File:
+
+  file_id = 102
+  file_type = vr_image
+
+Before inserting permission, this SQL should return 0:
+
+SELECT COUNT(*) AS permission_count
+FROM facility_images fi
+JOIN facilities_tree ft
+  ON fi.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+JOIN permission_master pm
+  ON pm.permission_id = frp.permission_id
+WHERE fi.file_id = 102
+  AND pm.permission_name = 'vr_image_view'
+  AND frp.keycloak_role_id IN ('viewer')
+  AND ft.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+  AND pm.deleted_at IS NULL
+  AND fi.deleted_at IS NULL;
+
+Expected API result:
+
+GET http://localhost:8081/files/102
+
+{
+  "success": false,
+  "error_code": "permission_denied",
+  "message": "ファイルを取得する権限がありません",
+  "errors": null,
+  "data": null
+}
+
+Now insert permission:
+
+INSERT INTO facility_role_permission (
+    permission_id,
+    facility_id,
+    keycloak_role_id,
+    keycloak_role_name
+)
+VALUES
+(20, 2, 'viewer', 'viewer');
+
+Run the count SQL again. It should return 1.
+
+Expected API result:
+
+GET http://localhost:8081/files/102
+
+Success response with file_url.
+
+
+Test Case 3: annotation Without Reference Role
+----------------------------------------------
+File:
+
+  file_id = 103
+  file_type = annotation
+
+Before inserting permission, this SQL should return 0:
+
+SELECT COUNT(*) AS permission_count
+FROM annotation_files af
+JOIN annotations a
+  ON af.annotation_id = a.annotation_id
+JOIN facilities_tree ft
+  ON a.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+JOIN permission_master pm
+  ON pm.permission_id = frp.permission_id
+WHERE af.file_id = 103
+  AND pm.permission_name IN ('annotation_view', 'annotation_manage')
+  AND frp.keycloak_role_id IN ('viewer')
+  AND ft.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+  AND pm.deleted_at IS NULL
+  AND a.deleted_at IS NULL
+  AND af.deleted_at IS NULL;
+
+Expected API result:
+
+GET http://localhost:8081/files/103
+
+{
+  "success": false,
+  "error_code": "permission_denied",
+  "message": "ファイルを取得する権限がありません",
+  "errors": null,
+  "data": null
+}
+
+Now insert permission:
+
+INSERT INTO facility_role_permission (
+    permission_id,
+    facility_id,
+    keycloak_role_id,
+    keycloak_role_name
+)
+VALUES
+(30, 2, 'viewer', 'viewer');
+
+Run the count SQL again. It should return 1.
+
+Expected API result:
+
+GET http://localhost:8081/files/103
+
+Success response with file_url.
+
+
+Postman Steps
+-------------
+Use the non-SYS_ADMIN user token.
+
+1. Get access token:
+
+POST http://localhost:8080/realms/pygmalion_viewer/protocol/openid-connect/token
+
+Body: x-www-form-urlencoded
+
+  grant_type=password
+  client_id=TestClient
+  client_secret=YOUR_CLIENT_SECRET
+  username=user03
+  password=YOUR_PASSWORD
+
+2. Confirm role:
+
+GET http://localhost:8081/api/keycloak/me
+
+Header:
+
+  Authorization: Bearer ACCESS_TOKEN
+
+Response roles must include:
+
+  viewer
+
+3. Test each file:
+
+GET http://localhost:8081/files/101
+GET http://localhost:8081/files/102
+GET http://localhost:8081/files/103
+
+Header:
+
+  Authorization: Bearer ACCESS_TOKEN
+
+
+Troubleshooting
+---------------
+1. If SQL count is 1 but API still returns permission_denied:
+   - Get a new access token.
+   - Check /api/keycloak/me shows "viewer".
+   - Restart Spring Boot after code changes.
+
+2. If SQL count is 0:
+   - Check files.file_type.
+   - Check relation table:
+     map_image: maps
+     vr_image: facility_images
+     annotation: annotation_files and annotations
+   - Check facility_role_permission.keycloak_role_id exactly matches token role.
+
+3. If GET returns file_download_failed:
+   - Check MinIO is running.
+   - Check minio.endpoint uses port 9000.
+   - Check bucket exists.
+
+4. If old uploaded files do not open:
+   - Re-upload new files with the current code.
+   - Current code expects MinIO object path:
+       {file_id}/{file_name}
+     Example:
+       101/test-map.png
+
