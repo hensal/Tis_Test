@@ -28,9 +28,9 @@ class KeycloakAdminServiceTest {
 
         assertThatThrownBy(() -> service.logoutCurrentSession("user-id", "session-id", "token"))
                 .isInstanceOf(KeycloakAdminException.class)
-                .hasMessage("The authentication information required for logout is invalid.")
+                .hasMessage("Keycloak管理APIの呼び出しに失敗しました")
                 .extracting("errorCode")
-                .isEqualTo("invalid_token");
+                .isEqualTo("keycloak_request_failed");
     }
 
     private static class TestHttpStatusCodeException extends HttpStatusCodeException {
