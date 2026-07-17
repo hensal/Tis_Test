@@ -1999,11 +1999,11 @@ Authorization: Bearer <SYS_ADMIN access token>
 Content-Type: application/json
 
 Before test data:
-- Use a parent facility_id created in 1-4-1.
-- Prepare one VR image file row in FILES, for example file_id 201.
-- Prepare one map image file row in FILES, for example file_id 202.
-- Prepare permission codes in PERMISSION_MASTER.
-- Prepare equipment IDs in EQUIPMENT_MASTERS.
+- Use an existing parent facility_id. With sample_data_DB設計.sql, use parent_id 1110.
+- Prepare one VR image file row in FILES. With sample_data_DB設計.sql, use file_id 5000.
+- Prepare one map image file row in FILES. With sample_data_DB設計.sql, use file_id 5009.
+- Prepare permission names in PERMISSION_MASTER. With sample_data_DB設計.sql, use Japanese names such as VR画像参照 and 付箋参照.
+- Prepare equipment IDs in EQUIPMENT_MASTERS. With sample_data_DB設計.sql, use equipment_id 10.
 - Use Keycloak roles that exist and are not SYS_ADMIN.
 
 Example request body:
@@ -2011,41 +2011,41 @@ Example request body:
 {
   "facility_name": "最大正常施設",
   "target_facility_id": null,
-  "parent_id": 1,
+  "parent_id": 1110,
   "facility_description": "施設詳細テスト\n改行を含む500文字以内の説明文",
   "public_flag": "02",
   "outer_flag": true,
   "authority_setting_flag": true,
   "vr_image": {
-    "file_id": 201,
-    "image_name": "vr_sample.jpg",
+    "file_id": 5000,
+    "image_name": "entrance.jpg",
     "shooting_height": 1600,
     "ceiling_height": 3000
   },
   "map": {
-    "file_id": 202,
-    "map_name": "map_sample.png",
-    "image_width": 1920,
-    "image_height": 1080
+    "file_id": 5009,
+    "map_name": "floorplan.png",
+    "image_width": 736,
+    "image_height": 736
   },
   "roles": [
     {
-      "keycloak_role_id": "viewer",
-      "permission_code": "facility_view"
+      "keycloak_role_id": "R_USER01",
+      "permission_code": "VR画像参照"
     },
     {
-      "keycloak_role_id": "editor",
-      "permission_code": "vr_image_view"
+      "keycloak_role_id": "R_USER01",
+      "permission_code": "付箋参照"
     }
   ],
   "equipments": [
     {
-      "equipment_id": 1,
+      "equipment_id": 10,
       "yaw": 45,
       "pitch": 10
     },
     {
-      "equipment_id": 1,
+      "equipment_id": 10,
       "yaw": -45,
       "pitch": -10
     }
@@ -2230,7 +2230,7 @@ Check:
 Use "shooting_height": 1600.
 
 Pass:
-facility_images.shooting_height_m stores the expected value.
+facility_images.shooting_height stores the expected value.
 
 
 1-6-12 vr_image.ceiling_height 3000を指定する
@@ -2243,7 +2243,7 @@ Check:
 Use "ceiling_height": 3000.
 
 Pass:
-facility_images.ceiling_height_m stores the expected value.
+facility_images.ceiling_height stores the expected value.
 
 
 1-6-13 map 下位のデータを1件登録する
@@ -2292,7 +2292,7 @@ Meaning:
 Set the map image width in pixels.
 
 Check:
-Use "image_width": 1920.
+Use "image_width": 736.
 
 Pass:
 maps.image_width stores the requested value.
@@ -2305,7 +2305,7 @@ Meaning:
 Set the map image height in pixels.
 
 Check:
-Use "image_height": 1080.
+Use "image_height": 736.
 
 Pass:
 maps.image_height stores the requested value.
@@ -2331,7 +2331,7 @@ Meaning:
 Use existing Keycloak roles, but do not use SYS_ADMIN.
 
 Check:
-Use roles such as viewer and editor, and make every role ID different.
+Use roles such as R_USER01 and R_PJMGR01, and make every role ID different.
 
 Pass:
 The API accepts the roles and stores them.
@@ -2344,7 +2344,7 @@ Meaning:
 Use permission codes that exist in PERMISSION_MASTER.
 
 Check:
-Use valid permission_code values such as facility_view or vr_image_view.
+Use valid permission_code values from PERMISSION_MASTER, such as VR画像参照 or 付箋参照.
 
 Pass:
 The API accepts the permission codes and stores them.
@@ -2434,7 +2434,7 @@ Description:
 The created facility has the requested parent_id.
 
 Test:
-Confirm parent_id = 1, or the parent_id used in the request.
+Confirm parent_id = 1110, or the parent_id used in the request.
 
 
 1-8-3 facility_name リクエストしたfacility_nameが設定されている
@@ -2564,7 +2564,7 @@ Description:
 The parent facility is no longer a leaf after adding a child.
 
 Test:
-SELECT is_leaf FROM facilities_tree WHERE facility_id = 1;
+SELECT is_leaf FROM facilities_tree WHERE facility_id = 1110;
 Confirm is_leaf = false.
 
 
@@ -2596,8 +2596,8 @@ No unrelated facilities_tree row is updated at the POST time.
 
 Test:
 SELECT COUNT(*) FROM facilities_tree
-WHERE facility_id NOT IN (1, <created_facility_id>)
-  AND updated_at = (SELECT updated_at FROM facilities_tree WHERE facility_id = 1);
+WHERE facility_id NOT IN (1110, <created_facility_id>)
+  AND updated_at = (SELECT updated_at FROM facilities_tree WHERE facility_id = 1110);
 Confirm count = 0.
 
 
@@ -2639,27 +2639,27 @@ Description:
 facility_images.file_id matches the requested VR file_id.
 
 Test:
-Confirm file_id = 201.
+Confirm file_id = 5000.
 
 
-1-8-23 vr_image.shooting_height_m 1600である
+1-8-23 vr_image.shooting_height 1600である
 -------------------------------------------
 
 Description:
 VR shooting height is stored from the request.
 
 Test:
-Confirm shooting_height_m = 1600.
+Confirm shooting_height = 1600.
 
 
-1-8-24 vr_image.ceiling_height_m 3000である
+1-8-24 vr_image.ceiling_height 3000である
 ------------------------------------------
 
 Description:
 VR ceiling height is stored from the request.
 
 Test:
-Confirm ceiling_height_m = 3000.
+Confirm ceiling_height = 3000.
 
 
 1-8-25 vr_image.created_at POST日時
@@ -2740,7 +2740,7 @@ Description:
 maps.file_id matches the requested map file_id.
 
 Test:
-Confirm file_id = 202.
+Confirm file_id = 5009.
 
 
 1-8-33 map.map_name リクエスト指定ファイル名
@@ -2750,7 +2750,7 @@ Description:
 map_name matches the requested map name.
 
 Test:
-Confirm map_name = 'map_sample.png'.
+Confirm map_name = 'floorplan.png'.
 
 
 1-8-34 map.image_width リクエスト指定値
@@ -2760,7 +2760,7 @@ Description:
 image_width matches the requested width.
 
 Test:
-Confirm image_width = 1920.
+Confirm image_width = 736.
 
 
 1-8-35 map.image_height リクエスト指定値
@@ -2770,7 +2770,7 @@ Description:
 image_height matches the requested height.
 
 Test:
-Confirm image_height = 1080.
+Confirm image_height = 736.
 
 
 1-8-36 map.created_at POST日時
