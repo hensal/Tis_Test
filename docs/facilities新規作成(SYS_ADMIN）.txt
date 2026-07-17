@@ -1,0 +1,3777 @@
+Facilities Create API Test Steps: facilities新規作成(SYS_ADMIN)
+================================================================
+
+API:
+POST http://localhost:8081/facilities
+
+Common Postman setup:
+1. Method: POST
+2. URL: http://localhost:8081/facilities
+3. Headers:
+   Authorization: Bearer <SYS_ADMIN access_token>
+   Content-Type: application/json
+4. Body:
+   raw -> JSON
+
+Expected common error response for invalid request parameters:
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Important:
+- The user token must have SYS_ADMIN role.
+- If the token is missing or wrong, you will get invalid_token first.
+- If the token does not have SYS_ADMIN, you will get permission_denied first.
+- New test cases should always be appended at the bottom in Excel serial order.
+- In SQL examples, <response_facility_id> means the actual data.facility_id returned by Postman.
+  Example: if Postman returns "facility_id": 18, use 18 in the SQL.
+
+
+1-1-5 facility_name文字列に制御コードを入れている
+---------------------------------------------------
+
+Meaning:
+The facility_name contains a control character.
+A control character is an invisible/non-printable character, for example:
+- newline
+- tab
+- carriage return
+- backspace
+
+Why this should be rejected:
+facility_name is a normal display name, so it should not contain invisible control codes.
+
+Current code check:
+FacilitiesService.requiredFacilityName(...)
+It rejects facility_name when:
+- it is blank
+- it is more than 100 characters
+- it contains Character.isISOControl(...)
+
+Postman test body:
+Use a newline escape sequence inside facility_name:
+
+{
+  "parent_id": 1,
+  "facility_name": "会議室\nテスト",
+  "public_flag": "02",
+  "outer_flag": false,
+  "facility_description": "control code test"
+}
+
+Alternative test body using tab:
+
+{
+  "parent_id": 1,
+  "facility_name": "会議室\tテスト",
+  "public_flag": "02",
+  "outer_flag": false,
+  "facility_description": "control code test"
+}
+
+Expected HTTP status:
+400 Bad Request
+
+Expected JSON response:
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+How to confirm DB was not changed:
+Run this SQL before and after the Postman request.
+The count should not increase.
+
+SELECT COUNT(*) AS facility_count
+FROM facilities_tree
+WHERE deleted_at IS NULL;
+
+If the API returns success, this test is failing.
+If the API returns the invalid_request response above, this test is passing.
+
+
+1-1-6 facility_name文字列を101文字以上にした
+------------------------------------------------
+
+Meaning:
+The facility_name is 101 characters or longer.
+
+Why this should be rejected:
+According to the Excel test case, facility_name must be 100 characters or less.
+
+Current code check:
+FacilitiesService.requiredFacilityName(...)
+It rejects facility_name when:
+- it is blank
+- it is more than 100 characters
+- it contains control characters
+
+Postman test body:
+Use this value. It is 101 ASCII characters:
+
+{
+  "parent_id": 1,
+  "facility_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "public_flag": "02",
+  "outer_flag": false,
+  "facility_description": "facility_name length test"
+}
+
+Expected HTTP status:
+400 Bad Request
+
+Expected JSON response:
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+How to confirm DB was not changed:
+Run this SQL before and after the Postman request.
+The count should not increase.
+
+SELECT COUNT(*) AS facility_count
+FROM facilities_tree
+WHERE deleted_at IS NULL;
+
+If the API returns success, this test is failing.
+If the API returns the invalid_request response above, this test is passing.
+
+
+1-1-7 parent_id文字列に制御コードを入れている
+------------------------------------------------
+
+Meaning:
+The parent_id value is sent as a string containing a control character.
+Example control characters:
+- newline: \n
+- tab: \t
+
+Important:
+To test this in Postman, parent_id must be sent as a string.
+If parent_id is sent as a normal JSON number, it cannot contain control characters.
+
+Why this should be rejected:
+parent_id must be numeric or empty/null. A string with a control character is not a valid facility ID.
+
+Current code check:
+FacilitiesService.createFacility(...)
+parent_id is parsed by optionalLong(...), then asLong(...).
+If the value is something like "1\n", it cannot be parsed as a Long, so the API returns invalid_request.
+
+Postman test body:
+
+{
+  "parent_id": "1\n",
+  "facility_name": "会議室テスト",
+  "public_flag": "02",
+  "outer_flag": false,
+  "facility_description": "parent_id control code test"
+}
+
+Alternative test body using tab:
+
+{
+  "parent_id": "1\t",
+  "facility_name": "会議室テスト",
+  "public_flag": "02",
+  "outer_flag": false,
+  "facility_description": "parent_id control code test"
+}
+
+Expected HTTP status:
+400 Bad Request
+
+Expected JSON response:
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+How to confirm DB was not changed:
+Run this SQL before and after the Postman request.
+The count should not increase.
+
+SELECT COUNT(*) AS facility_count
+FROM facilities_tree
+WHERE deleted_at IS NULL;
+
+If the API returns success, this test is failing.
+If the API returns the invalid_request response above, this test is passing.
+
+
+1-1-8 parent_idに数値以外を設定した
+-------------------------------------
+
+Meaning:
+parent_id is set to a non-numeric value.
+
+Why this should be rejected:
+parent_id must be:
+- a valid numeric facility ID
+- null
+- empty string
+
+Any other text value is invalid.
+
+Current code check:
+FacilitiesService.createFacility(...)
+parent_id is parsed by optionalLong(...), then asLong(...).
+If the value cannot be converted to Long, the API returns invalid_request.
+
+Postman test body:
+
+{
+  "parent_id": "abc",
+  "facility_name": "会議室テスト",
+  "public_flag": "02",
+  "outer_flag": false,
+  "facility_description": "parent_id non numeric test"
+}
+
+Expected HTTP status:
+400 Bad Request
+
+Expected JSON response:
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+How to confirm DB was not changed:
+Run this SQL before and after the Postman request.
+The count should not increase.
+
+SELECT COUNT(*) AS facility_count
+FROM facilities_tree
+WHERE deleted_at IS NULL;
+
+If the API returns success, this test is failing.
+If the API returns the invalid_request response above, this test is passing.
+
+
+1-1-9 存在しないfacility_idをparent_idに設定した
+--------------------------------------------------
+
+Meaning:
+parent_id is numeric, but that facility_id does not exist in facilities_tree.
+This does not apply when parent_id is null.
+
+Why this should be rejected:
+If parent_id is set, the new facility must be created under an existing parent facility.
+If the parent facility does not exist, the tree structure becomes invalid.
+
+Current code check:
+FacilitiesService.createFacility(...)
+If parent_id is not null, it calls getActiveFacility(parentId).
+If the parent facility is not found or is deleted, the API rejects the request.
+
+Postman test body:
+Use a very large ID that does not exist in your DB.
+
+{
+  "parent_id": 999999999,
+  "facility_name": "会議室テスト",
+  "public_flag": "02",
+  "outer_flag": false,
+  "facility_description": "non existing parent_id test"
+}
+
+Expected HTTP status:
+404 Not Found
+
+Expected JSON response:
+{
+  "success": false,
+  "error_code": "not_found",
+  "message": "対象施設が見つかりません",
+  "errors": null,
+  "data": null
+}
+
+How to confirm DB was not changed:
+Run this SQL before and after the Postman request.
+The count should not increase.
+
+SELECT COUNT(*) AS facility_count
+FROM facilities_tree
+WHERE deleted_at IS NULL;
+
+If the API returns success, this test is failing.
+If the API returns the not_found response above, this test is passing.
+
+
+1-2-1 リクエストパラメータ（最低限のパラメータ送信） facility_name
+------------------------------------------------------------------
+
+Meaning:
+Send the minimum required request parameters.
+For this item, set any valid facility name.
+
+Why this should be accepted:
+facility_name is the required name of the new facility.
+For the minimum request case, other optional values can be omitted or sent as empty/null depending on the following items.
+
+Current code check:
+FacilitiesService.requiredFacilityName(...)
+The facility_name is accepted when:
+- it is not blank
+- it is 100 characters or less
+- it does not contain control characters
+
+Postman test body:
+Use only the minimum facility_name first.
+
+{
+  "facility_name": "会議室テスト"
+}
+
+Expected HTTP status:
+200 OK
+
+Expected JSON response format:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1001
+  }
+}
+
+The actual facility_id will be generated by PostgreSQL, so the number can be different.
+
+How to confirm DB was changed:
+Use the facility_id from the response and run:
+
+SELECT *
+FROM facilities_tree
+WHERE facility_id = <response_facility_id>;
+
+Expected DB values for this minimum request:
+- facility_name = "会議室テスト"
+- parent_id = NULL
+- tree_level = 1
+- is_leaf = TRUE
+- public_flag = '01'
+- outer_flag = FALSE
+- authority_setting_flg = FALSE
+- deleted_at = NULL
+
+If the API returns success and the DB row exists, this test is passing.
+
+
+1-2-2 リクエストパラメータ（最低限のパラメータ送信） parent_id
+----------------------------------------------------------------
+
+Meaning:
+Set parent_id to an empty string.
+
+Why this should be accepted:
+In this test case, empty parent_id means there is no parent facility.
+So the new facility is created as a root-level facility.
+
+Current code check:
+FacilitiesService.optionalLong(...)
+If parent_id is an empty string, it is treated as null.
+
+Postman test body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": ""
+}
+
+Expected HTTP status:
+200 OK
+
+Expected JSON response format:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1001
+  }
+}
+
+The actual facility_id will be generated by PostgreSQL, so the number can be different.
+
+How to confirm DB was changed:
+Use the facility_id from the response and run:
+
+SELECT facility_id, parent_id, facility_name, tree_level, is_leaf
+FROM facilities_tree
+WHERE facility_id = <response_facility_id>;
+
+Expected DB values:
+- parent_id = NULL
+- facility_name = "会議室テスト"
+- tree_level = 1
+- is_leaf = TRUE
+
+If the API returns success and parent_id is NULL in DB, this test is passing.
+
+
+1-2-3 リクエストパラメータ（最低限のパラメータ送信） target_facility_id
+-------------------------------------------------------------------------
+
+Meaning:
+Set target_facility_id to an empty string.
+
+Why this should be accepted:
+target_facility_id is optional.
+An empty target_facility_id means the new facility is not inserted after a specific sibling facility.
+The API should use the normal new sort_order for the selected parent/root level.
+
+Current code check:
+FacilitiesService.optionalLong(...)
+If target_facility_id is an empty string, it is treated as null.
+
+Postman test body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": "",
+  "target_facility_id": ""
+}
+
+Expected HTTP status:
+200 OK
+
+Expected JSON response format:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1001
+  }
+}
+
+The actual facility_id will be generated by PostgreSQL, so the number can be different.
+
+How to confirm DB was changed:
+Use the facility_id from the response and run:
+
+SELECT facility_id, parent_id, facility_name, sort_order, tree_level, is_leaf
+FROM facilities_tree
+WHERE facility_id = <response_facility_id>;
+
+Expected DB values:
+- parent_id = NULL
+- facility_name = "会議室テスト"
+- tree_level = 1
+- is_leaf = TRUE
+- sort_order is generated by the API
+
+If the API returns success and the row exists in DB, this test is passing.
+
+
+1-4-1 DBの値 facility_id
+-------------------------
+
+Meaning:
+After POST /facilities succeeds, the response facility_id must be the same ID that was inserted into the facilities_tree table.
+
+Why this should be checked:
+The API response must point to the actual database record created by the API.
+
+Current code behavior:
+FacilitiesService.createFacility(...)
+The code inserts a row into facilities_tree using PostgreSQL auto-generated facility_id.
+Then it returns that generated facility_id in the response.
+
+Postman test:
+Send a valid minimum create request:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": "",
+  "target_facility_id": ""
+}
+
+Expected HTTP status:
+200 OK
+
+Example response:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1001
+  }
+}
+
+SQL check:
+Replace <response_facility_id> with the facility_id returned by Postman.
+
+SELECT facility_id, facility_name
+FROM facilities_tree
+WHERE facility_id = <response_facility_id>;
+
+Expected SQL result:
+- One row is returned.
+- facility_id is exactly the same as the response data.facility_id.
+
+Example:
+If Postman returned:
+
+{
+  "data": {
+    "facility_id": 1001
+  }
+}
+
+Then run:
+
+SELECT facility_id, facility_name
+FROM facilities_tree
+WHERE facility_id = 1001;
+
+Passing condition:
+The SQL returns one row with facility_id = 1001.
+
+Failing condition:
+- No row is returned.
+- A different facility_id is returned.
+
+
+1-4-2 DBの値 parent_id
+-----------------------
+
+Meaning:
+For the created facility_id, the DB parent_id must match the parent_id sent in the request.
+
+Why this should be checked:
+The facility tree structure depends on parent_id.
+If the API stores a different parent_id, the new facility will appear under the wrong parent.
+
+Current code behavior:
+FacilitiesService.createFacility(...)
+The code parses parent_id from the request.
+- If parent_id is "" or null, it stores NULL.
+- If parent_id is a valid existing facility ID, it stores that ID.
+
+Postman test body example 1: parent_id empty
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": "",
+  "target_facility_id": ""
+}
+
+Expected DB parent_id:
+NULL
+
+SQL check:
+Replace <response_facility_id> with the facility_id returned by Postman.
+
+SELECT facility_id, parent_id, facility_name
+FROM facilities_tree
+WHERE facility_id = <response_facility_id>;
+
+Passing condition for example 1:
+parent_id is NULL.
+
+Postman test body example 2: parent_id = 1
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": ""
+}
+
+Expected DB parent_id:
+1
+
+SQL check:
+
+SELECT facility_id, parent_id, facility_name
+FROM facilities_tree
+WHERE facility_id = <response_facility_id>;
+
+Passing condition for example 2:
+parent_id is 1.
+
+Failing condition:
+- parent_id is different from the request value.
+- The created row does not exist.
+
+
+1-4-14 DBの値 他の施設ツリーテーブルのレコード
+------------------------------------------------
+
+Meaning:
+For the minimum create request, only one new facilities_tree row should be inserted.
+No other facilities_tree rows should be inserted, updated, or deleted.
+
+Excel condition:
+この新規作成処理で、Insert、Update、Deleteされているレコードは無い
+Insert、Delete：この新規作成処理前後でのレコード数が、新規作成レコードの＋１だけである
+Update：updated_atが同じ日時のレコードが無い
+
+Important:
+This check is for the minimum request case where parent_id is empty/null.
+If parent_id is set to an existing parent, the API may update the parent row's is_leaf and updated_at.
+That parent update belongs to the later parent-child create test cases, not this minimum root-create case.
+
+Current code behavior:
+FacilitiesService.createFacility(...)
+For parent_id = "" or null:
+- Inserts one new row into facilities_tree.
+- Does not update a parent row because there is no parent.
+- Does not delete any row.
+
+Step 1: Before sending Postman request, run this SQL.
+Record the count result.
+
+SELECT COUNT(*) AS before_count
+FROM facilities_tree;
+
+Step 2: Send this minimum create request in Postman.
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": "",
+  "target_facility_id": ""
+}
+
+Step 3: From the Postman response, copy data.facility_id.
+Example:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1001
+  }
+}
+
+Step 4: After sending Postman request, run this SQL.
+Record the count result.
+
+SELECT COUNT(*) AS after_count
+FROM facilities_tree;
+
+Passing condition for Insert/Delete:
+after_count = before_count + 1
+
+Step 5: Check that only the created row has the same created_at and updated_at timestamp.
+Replace <response_facility_id> with the facility_id returned by Postman.
+
+SELECT facility_id, created_at, updated_at, deleted_at
+FROM facilities_tree
+WHERE facility_id = <response_facility_id>;
+
+Expected:
+- The created row exists.
+- created_at is the POST time.
+- updated_at is the POST time.
+- deleted_at is NULL.
+
+Step 6: Check that no other row was updated at the same timestamp as the created row.
+Replace <response_facility_id> with the facility_id returned by Postman.
+
+SELECT other.facility_id, other.updated_at
+FROM facilities_tree created
+JOIN facilities_tree other
+  ON other.updated_at = created.updated_at
+WHERE created.facility_id = <response_facility_id>
+  AND other.facility_id <> created.facility_id;
+
+Expected SQL result:
+0 rows.
+
+Passing condition:
+- facilities_tree count increased by exactly 1.
+- The created facility row exists.
+- No other row has the same updated_at timestamp as the created row.
+
+Failing condition:
+- Count increased by more than 1.
+- Count did not increase.
+- Any other row has the same updated_at timestamp.
+- Any unrelated row was deleted.
+
+
+1-4-15 DBの値 vr_image
+-----------------------
+
+Meaning:
+For minimum create, no row should be added to facility_images.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": "",
+  "target_facility_id": ""
+}
+
+SQL check:
+Replace <response_facility_id> with the facility_id returned by Postman.
+
+SELECT COUNT(*) AS image_count
+FROM facility_images
+WHERE facility_id = <response_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+image_count = 0
+
+Pass:
+No facility_images row exists for the created facility.
+
+
+1-4-17 DBの値 map
+------------------
+
+Meaning:
+For minimum create, no row should be added to maps for the created facility.
+
+SQL check:
+
+SELECT COUNT(*) AS map_count
+FROM maps
+WHERE facility_id = <response_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+map_count = 0
+
+Pass:
+No maps row exists for the created facility.
+
+
+1-4-18 DBの値 maps table unchanged
+-----------------------------------
+
+Meaning:
+For minimum create, the maps table should not be changed at all.
+
+SQL before Postman:
+
+SELECT COUNT(*) AS before_count
+FROM maps;
+
+SQL after Postman:
+
+SELECT COUNT(*) AS after_count
+FROM maps;
+
+Expected:
+after_count = before_count
+
+Check update:
+
+SELECT m.map_id, m.updated_at
+FROM maps m
+JOIN facilities_tree f
+  ON m.updated_at = f.updated_at
+WHERE f.facility_id = <response_facility_id>;
+
+Expected:
+0 rows
+
+Pass:
+No insert, update, or delete happened in maps.
+
+
+1-4-19 DBの値 map_point
+------------------------
+
+Meaning:
+For minimum create, no row should be added to map_points for the created facility.
+
+SQL check:
+
+SELECT COUNT(*) AS map_point_count
+FROM map_points
+WHERE facility_id = <response_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+map_point_count = 0
+
+Pass:
+No map_points row exists for the created facility.
+
+
+1-4-20 DBの値 map_points table unchanged
+-----------------------------------------
+
+Meaning:
+For minimum create, the map_points table should not be changed at all.
+
+SQL before Postman:
+
+SELECT COUNT(*) AS before_count
+FROM map_points;
+
+SQL after Postman:
+
+SELECT COUNT(*) AS after_count
+FROM map_points;
+
+Expected:
+after_count = before_count
+
+Check update:
+
+SELECT mp.map_point_id, mp.updated_at
+FROM map_points mp
+JOIN facilities_tree f
+  ON mp.updated_at = f.updated_at
+WHERE f.facility_id = <response_facility_id>;
+
+Expected:
+0 rows
+
+Pass:
+No insert, update, or delete happened in map_points.
+
+
+1-4-21 DBの値 roles
+--------------------
+
+Meaning:
+For minimum create, no row should be added to facility_role_permission for the created facility.
+
+SQL check:
+
+SELECT COUNT(*) AS role_count
+FROM facility_role_permission
+WHERE facility_id = <response_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+role_count = 0
+
+Pass:
+No facility_role_permission row exists for the created facility.
+
+
+1-4-22 DBの値 facility_role_permission table unchanged
+------------------------------------------------------
+
+Meaning:
+For minimum create, the facility_role_permission table should not be changed at all.
+
+SQL before Postman:
+
+SELECT COUNT(*) AS before_count
+FROM facility_role_permission;
+
+SQL after Postman:
+
+SELECT COUNT(*) AS after_count
+FROM facility_role_permission;
+
+Expected:
+after_count = before_count
+
+Check update:
+
+SELECT frp.facility_role_permission_id, frp.updated_at
+FROM facility_role_permission frp
+JOIN facilities_tree f
+  ON frp.updated_at = f.updated_at
+WHERE f.facility_id = <response_facility_id>;
+
+Expected:
+0 rows
+
+Pass:
+No insert, update, or delete happened in facility_role_permission.
+
+
+1-4-23 DBの値 equipments
+-------------------------
+
+Meaning:
+For minimum create, no row should be added to equipments for the created facility.
+
+SQL check:
+
+SELECT COUNT(*) AS equipment_count
+FROM equipments
+WHERE facility_id = <response_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+equipment_count = 0
+
+Pass:
+No equipments row exists for the created facility.
+
+
+1-4-24 DBの値 equipments table unchanged
+-----------------------------------------
+
+Meaning:
+For minimum create, the equipments table should not be changed at all.
+
+SQL before Postman:
+
+SELECT COUNT(*) AS before_count
+FROM equipments;
+
+SQL after Postman:
+
+SELECT COUNT(*) AS after_count
+FROM equipments;
+
+Expected:
+after_count = before_count
+
+Check update:
+
+SELECT e.content_id, e.updated_at
+FROM equipments e
+JOIN facilities_tree f
+  ON e.updated_at = f.updated_at
+WHERE f.facility_id = <response_facility_id>;
+
+Expected:
+0 rows
+
+Pass:
+No insert, update, or delete happened in equipments.
+
+
+1-4-25 DBの値 annotations
+--------------------------
+
+Meaning:
+For minimum create, no row should be added to annotations for the created facility.
+
+SQL check:
+
+SELECT COUNT(*) AS annotation_count
+FROM annotations
+WHERE facility_id = <response_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+annotation_count = 0
+
+Pass:
+No annotations row exists for the created facility.
+
+
+1-4-26 DBの値 annotations table unchanged
+------------------------------------------
+
+Meaning:
+For minimum create, the annotations table should not be changed at all.
+
+SQL before Postman:
+
+SELECT COUNT(*) AS before_count
+FROM annotations;
+
+SQL after Postman:
+
+SELECT COUNT(*) AS after_count
+FROM annotations;
+
+Expected:
+after_count = before_count
+
+Check update:
+
+SELECT a.annotation_id, a.updated_at
+FROM annotations a
+JOIN facilities_tree f
+  ON a.updated_at = f.updated_at
+WHERE f.facility_id = <response_facility_id>;
+
+Expected:
+0 rows
+
+Pass:
+No insert, update, or delete happened in annotations.
+
+
+1-5-1 リクエストパラメータ facility_description 501文字以上
+------------------------------------------------------------
+
+Meaning:
+Send facility_description with 501 or more characters.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true
+}
+
+Expected HTTP status:
+400 Bad Request
+
+Expected JSON response:
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-2 リクエストパラメータ target_facility_id にNULL以外の数値
+----------------------------------------------------------------
+
+Meaning:
+Send a numeric target_facility_id when there is no valid sibling facility under the same parent.
+
+Short explanation:
+target_facility_id means "place the new facility after this sibling facility".
+If that target facility does not exist under the same parent_id, the request is invalid.
+
+Postman body:
+Use a target_facility_id that is not a child of parent_id = 1.
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": 999999999,
+  "facility_description": "target facility invalid test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true
+}
+
+Expected HTTP status:
+400 Bad Request
+
+Expected JSON response:
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+SQL check:
+
+SELECT COUNT(*) AS target_count
+FROM facilities_tree
+WHERE facility_id = 999999999
+  AND parent_id = 1
+  AND deleted_at IS NULL;
+
+Expected:
+target_count = 0
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-3 target_facility_idに数値以外の文字列を指定する
+----------------------------------------------------
+
+Meaning:
+target_facility_id is not numeric.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "abc",
+  "facility_description": "invalid target_facility_id test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-4 public_flagに[01][02][03]以外の値を指定する
+--------------------------------------------------
+
+Meaning:
+public_flag must be one of 01, 02, or 03.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid public_flag test",
+  "public_flag": "99",
+  "outer_flag": true,
+  "authority_setting_flag": true
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-5 outer_flagにTrue,False以外の値を指定する
+-----------------------------------------------
+
+Meaning:
+outer_flag must be true or false.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid outer_flag test",
+  "public_flag": "02",
+  "outer_flag": "yes",
+  "authority_setting_flag": true
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-6 authority_setting_flagにTrue,False以外の値を指定する
+----------------------------------------------------------
+
+Meaning:
+authority_setting_flag must be true or false.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid authority_setting_flag test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": "yes"
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-7 map_pointsフィールドがある
+---------------------------------
+
+Meaning:
+map_points is sent, but the parent facility has no map.
+
+Postman body:
+Use a parent_id that has no row in maps.
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid map_points test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "map_points": [
+    {
+      "x": 10,
+      "y": 20
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-8 annotationsフィールドがある
+----------------------------------
+
+Meaning:
+annotations is sent during facility create.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid annotations test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "annotations": [
+    {
+      "annotation_title": "test"
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-9 vr_imageフィールドの下位データが2件以上ある
+--------------------------------------------------
+
+Meaning:
+vr_image has two or more child records.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid vr_image count test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": [
+    {
+      "file_id": 1,
+      "image_name": "vr1.jpg",
+      "shooting_height": 1600,
+      "ceiling_height": 3000
+    },
+    {
+      "file_id": 2,
+      "image_name": "vr2.jpg",
+      "shooting_height": 1600,
+      "ceiling_height": 3000
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-10 vr_imageフィールドの下位データが2件以上ある
+---------------------------------------------------
+
+Meaning:
+Same as 1-5-9. The Excel has this duplicated.
+One facility can have only one VR image during create.
+
+Postman body:
+Use the same body as 1-5-9.
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-11 vr_image.image_nameに256文字より大きい文字数の文字列を指定する
+---------------------------------------------------------------------
+
+Meaning:
+vr_image.image_name is longer than the allowed length.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid vr image name test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": [
+    {
+      "file_id": 1,
+      "image_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "shooting_height": 1600,
+      "ceiling_height": 3000
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-12 vr_image.file_idに数値ではない文字列を指定する
+-----------------------------------------------------
+
+Meaning:
+vr_image.file_id is not numeric.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid vr file_id test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": [
+    {
+      "file_id": "abc",
+      "image_name": "vr1.jpg",
+      "shooting_height": 1600,
+      "ceiling_height": 3000
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-13 vr_image.file_idにFILES.FILEIDに存在しないIDを指定する
+-------------------------------------------------------------
+
+Meaning:
+vr_image.file_id is numeric, but that file_id does not exist in the files table.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "missing vr file_id test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": [
+    {
+      "file_id": 999999999,
+      "image_name": "vr1.jpg",
+      "shooting_height": 1600,
+      "ceiling_height": 3000
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-14 vr_image.shooting_heightに正の整数以外の文字列を指定する
+---------------------------------------------------------------
+
+Meaning:
+vr_image.shooting_height is not a positive integer.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid shooting_height test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": [
+    {
+      "file_id": 1,
+      "image_name": "vr1.jpg",
+      "shooting_height": "abc",
+      "ceiling_height": 3000
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-15 vr_image.shooting_heightにマイナス数値を指定する
+------------------------------------------------------
+
+Meaning:
+vr_image.shooting_height is negative.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "negative shooting_height test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": [
+    {
+      "file_id": 1,
+      "image_name": "vr1.jpg",
+      "shooting_height": -1,
+      "ceiling_height": 3000
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-16 vr_image.ceiling_heightに正の整数以外の文字列を指定する
+-------------------------------------------------------------
+
+Meaning:
+vr_image.ceiling_height is not a positive integer.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid ceiling_height test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": [
+    {
+      "file_id": 1,
+      "image_name": "vr1.jpg",
+      "shooting_height": 1600,
+      "ceiling_height": "abc"
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-17 vr_image.ceiling_heightにマイナス数値を指定する
+----------------------------------------------------
+
+Meaning:
+vr_image.ceiling_height is negative.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "negative ceiling_height test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": [
+    {
+      "file_id": 1,
+      "image_name": "vr1.jpg",
+      "shooting_height": 1600,
+      "ceiling_height": -1
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-18 roles.keycloak_role_idにkeycloakのロールに無いロールIDを指定する
+------------------------------------------------------------------------
+
+Meaning:
+roles.keycloak_role_id does not exist as a Keycloak role.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid role id test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "roles": [
+    {
+      "keycloak_role_id": "NO_SUCH_ROLE",
+      "keycloak_role_name": "NO_SUCH_ROLE",
+      "permission_code": "facility_view"
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-19 roles.keycloak_role_idにSYS_ADMINのロールを指定する
+----------------------------------------------------------
+
+Meaning:
+SYS_ADMIN is the system administrator role, so it must not be assigned here.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "sys admin role invalid test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "roles": [
+    {
+      "keycloak_role_id": "SYS_ADMIN",
+      "keycloak_role_name": "SYS_ADMIN",
+      "permission_code": "facility_view"
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-20 roles.permission_codeにPERMISSION_MASTER.PERMITTION_IDに無い文字列を指定する
+----------------------------------------------------------------------------------
+
+Meaning:
+roles.permission_code does not exist in permission_master.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid permission code test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "roles": [
+    {
+      "keycloak_role_id": "viewer",
+      "keycloak_role_name": "viewer",
+      "permission_code": "NO_SUCH_PERMISSION"
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-21 equipments.equipment_idにEQUIPMENT_MASTERS.EQUIPMENT_MASTER_IDに無い文字列を指定する
+------------------------------------------------------------------------------------------
+
+Meaning:
+equipments.equipment_id does not exist in equipment_masters.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid equipment id test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "equipments": [
+    {
+      "equipment_id": "NO_SUCH_EQUIPMENT",
+      "yaw": 0,
+      "pitch": 0
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-22 equipments.yawに-180～180以外の数値を指定する
+----------------------------------------------------
+
+Meaning:
+equipments.yaw is outside the allowed range -180 to 180.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid yaw range test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "equipments": [
+    {
+      "equipment_id": 1,
+      "yaw": 181,
+      "pitch": 0
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-23 equipments.yawに数値以外を指定する
+-----------------------------------------
+
+Meaning:
+equipments.yaw is not numeric.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid yaw type test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "equipments": [
+    {
+      "equipment_id": 1,
+      "yaw": "abc",
+      "pitch": 0
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-24 equipments.pitchに-180～180以外の数値を指定する
+------------------------------------------------------
+
+Meaning:
+equipments.pitch is outside the allowed range -180 to 180.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid pitch range test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "equipments": [
+    {
+      "equipment_id": 1,
+      "yaw": 0,
+      "pitch": 181
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-5-25 equipments.pitchに数値以外を指定する
+-------------------------------------------
+
+Meaning:
+equipments.pitch is not numeric.
+
+Postman body:
+
+{
+  "facility_name": "会議室テスト",
+  "parent_id": 1,
+  "target_facility_id": "",
+  "facility_description": "invalid pitch type test",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "equipments": [
+    {
+      "equipment_id": 1,
+      "yaw": 0,
+      "pitch": "abc"
+    }
+  ]
+}
+
+Expected:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Pass:
+The API returns invalid_request and no facility is created.
+
+
+1-6 リクエストパラメータ（最大のパラメータ送信：正常時）
+---------------------------------------------------------
+
+Meaning:
+This test sends the maximum normal create request. It should create one facility and the related child data that is allowed during create.
+
+Postman:
+POST http://localhost:8081/facilities
+
+Headers:
+Authorization: Bearer <SYS_ADMIN access token>
+Content-Type: application/json
+
+Before test data:
+- Use a parent facility_id created in 1-4-1.
+- Prepare one VR image file row in FILES, for example file_id 201.
+- Prepare one map image file row in FILES, for example file_id 202.
+- Prepare permission codes in PERMISSION_MASTER.
+- Prepare equipment IDs in EQUIPMENT_MASTERS.
+- Use Keycloak roles that exist and are not SYS_ADMIN.
+
+Example request body:
+
+{
+  "facility_name": "最大正常施設",
+  "target_facility_id": null,
+  "parent_id": 1,
+  "facility_description": "施設詳細テスト\n改行を含む500文字以内の説明文",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": {
+    "file_id": 201,
+    "image_name": "vr_sample.jpg",
+    "shooting_height": 1600,
+    "ceiling_height": 3000
+  },
+  "map": {
+    "file_id": 202,
+    "map_name": "map_sample.png",
+    "image_width": 1920,
+    "image_height": 1080
+  },
+  "roles": [
+    {
+      "keycloak_role_id": "viewer",
+      "permission_code": "facility_view"
+    },
+    {
+      "keycloak_role_id": "editor",
+      "permission_code": "vr_image_view"
+    }
+  ],
+  "equipments": [
+    {
+      "equipment_id": 1,
+      "yaw": 45,
+      "pitch": 10
+    },
+    {
+      "equipment_id": 1,
+      "yaw": -45,
+      "pitch": -10
+    }
+  ]
+}
+
+Expected:
+200 OK
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": <created_facility_id>
+  }
+}
+
+DB check:
+
+SELECT *
+FROM facilities_tree
+WHERE facility_id = <created_facility_id>;
+
+SELECT *
+FROM facility_images
+WHERE facility_id = <created_facility_id>;
+
+SELECT *
+FROM maps
+WHERE facility_id = <created_facility_id>;
+
+SELECT *
+FROM facility_role_permission
+WHERE facility_id = <created_facility_id>;
+
+SELECT *
+FROM equipments
+WHERE facility_id = <created_facility_id>;
+
+Pass:
+The API returns success and all allowed related records are created.
+
+
+1-6-1 facility_name 適当な施設名を設定する
+-----------------------------------------
+
+Meaning:
+Set any valid facility name.
+
+Check:
+Use "最大正常施設" in facility_name.
+
+Pass:
+The created facilities_tree row stores the same name.
+
+
+1-6-2 target_facility_id NULLを指定する
+--------------------------------------
+
+Meaning:
+Send target_facility_id as null.
+
+Check:
+Use "target_facility_id": null.
+
+Pass:
+The API accepts null and creates the facility.
+
+
+1-6-3 parent_id 1-4-1で登録したfacility_idを指定する
+---------------------------------------------------
+
+Meaning:
+Use the facility_id created in 1-4-1 as the parent_id.
+
+Check:
+Replace parent_id with that existing facility_id.
+
+Pass:
+The created row has the requested parent_id.
+
+
+1-6-4 facility_description 適当な施設詳細を改行コード付きで文字数500文字で設定する
+--------------------------------------------------------------------------------
+
+Meaning:
+Set a valid description up to 500 characters, including a newline.
+
+Check:
+Use "\n" inside facility_description and keep the total length at 500 or less.
+
+Pass:
+The created row stores the same description.
+
+
+1-6-5 public_flag 02を設定する
+------------------------------
+
+Meaning:
+Set public_flag to 02.
+
+Check:
+Use "public_flag": "02".
+
+Pass:
+The created row stores public_flag = 02.
+
+
+1-6-6 outer_flag Trueを設定する
+-------------------------------
+
+Meaning:
+Set outer_flag to true.
+
+Check:
+Use "outer_flag": true.
+
+Pass:
+The created row stores outer_flag = true.
+
+
+1-6-7 authority_setting_flag Trueを設定する
+------------------------------------------
+
+Meaning:
+Set authority_setting_flag to true.
+
+Check:
+Use "authority_setting_flag": true.
+
+Pass:
+The created row stores authority_setting_flag = true.
+
+
+1-6-8 vr_image 下位のデータを1件登録する
+----------------------------------------
+
+Meaning:
+Register exactly one VR image child record.
+
+Check:
+Send one vr_image object only.
+
+Pass:
+One facility_images row exists for the created facility_id.
+
+
+1-6-9 vr_image.file_id FilesAPIで登録したFILE_IDを指定する
+--------------------------------------------------------
+
+Meaning:
+Use a file_id that exists in FILES for VR image data.
+
+Check:
+Use the FILES.file_id created by POST /files, or a prepared test row.
+
+Pass:
+facility_images.file_id matches the requested file_id.
+
+
+1-6-10 vr_image.image_name FILES.FILE_NAMEと同じものを指定する
+-------------------------------------------------------------
+
+Meaning:
+Use the same image_name as the FILES.file_name.
+
+Check:
+Set image_name to the matching file name.
+
+Pass:
+facility_images.image_name is stored correctly.
+
+
+1-6-11 vr_image.shooting_height 1600を指定する
+---------------------------------------------
+
+Meaning:
+Set shooting_height to 1600.
+
+Check:
+Use "shooting_height": 1600.
+
+Pass:
+facility_images.shooting_height_m stores the expected value.
+
+
+1-6-12 vr_image.ceiling_height 3000を指定する
+--------------------------------------------
+
+Meaning:
+Set ceiling_height to 3000.
+
+Check:
+Use "ceiling_height": 3000.
+
+Pass:
+facility_images.ceiling_height_m stores the expected value.
+
+
+1-6-13 map 下位のデータを1件登録する
+-----------------------------------
+
+Meaning:
+Register exactly one map child record.
+
+Check:
+Send one map object only.
+
+Pass:
+One maps row exists for the created facility_id.
+
+
+1-6-14 map.file_id FilesAPIで登録したFILE_IDを指定する
+----------------------------------------------------
+
+Meaning:
+Use a file_id that exists in FILES for map image data.
+
+Check:
+Use the FILES.file_id created by POST /files, or a prepared test row.
+
+Pass:
+maps.file_id matches the requested file_id.
+
+
+1-6-15 map.map_name FILES.FILE_NAMEと同じものを指定する
+-----------------------------------------------------
+
+Meaning:
+Use the same map_name as the FILES.file_name.
+
+Check:
+Set map_name to the matching file name.
+
+Pass:
+maps.map_name is stored correctly.
+
+
+1-6-16 map.image_width 地図イメージの幅ピクセル数を指定する
+----------------------------------------------------------
+
+Meaning:
+Set the map image width in pixels.
+
+Check:
+Use "image_width": 1920.
+
+Pass:
+maps.image_width stores the requested value.
+
+
+1-6-17 map.image_height 地図イメージの高さピクセル数を指定する
+------------------------------------------------------------
+
+Meaning:
+Set the map image height in pixels.
+
+Check:
+Use "image_height": 1080.
+
+Pass:
+maps.image_height stores the requested value.
+
+
+1-6-18 roles 下位のデータを複数件登録する
+-----------------------------------------
+
+Meaning:
+Register multiple role-permission child records.
+
+Check:
+Send at least two roles entries.
+
+Pass:
+facility_role_permission has the same number of rows for the created facility_id.
+
+
+1-6-19 roles.keycloak_role_id keycloakに存在するSYS_ADMIN以外のロールを指定する
+-------------------------------------------------------------------------------
+
+Meaning:
+Use existing Keycloak roles, but do not use SYS_ADMIN.
+
+Check:
+Use roles such as viewer and editor, and make every role ID different.
+
+Pass:
+The API accepts the roles and stores them.
+
+
+1-6-20 roles.permission_code PERMISSION_MASTER.PERMITTION_IDにある文字列を指定する
+--------------------------------------------------------------------------------
+
+Meaning:
+Use permission codes that exist in PERMISSION_MASTER.
+
+Check:
+Use valid permission_code values such as facility_view or vr_image_view.
+
+Pass:
+The API accepts the permission codes and stores them.
+
+
+1-6-21 equipments 下位のデータを複数件登録する
+---------------------------------------------
+
+Meaning:
+Register multiple equipment child records.
+
+Check:
+Send at least two equipments entries.
+
+Pass:
+equipments has the same number of rows for the created facility_id.
+
+
+1-6-22 equipments.equipment_id EQUIPMENT_MASTERS.EQUIPMENT_MASTER_IDにある文字列を指定する
+---------------------------------------------------------------------------------------
+
+Meaning:
+Use equipment_id values that exist in EQUIPMENT_MASTERS. The same master ID may be reused.
+
+Check:
+Use an existing equipment_id, for example 1.
+
+Pass:
+The API accepts the equipment_id and stores the equipment rows.
+
+
+1-6-23 equipments.yaw -180～180の適当な数値を指定する
+---------------------------------------------------
+
+Meaning:
+Set yaw to any number from -180 to 180.
+
+Check:
+Use values such as 45 and -45.
+
+Pass:
+The API stores the yaw values.
+
+
+1-6-24 equipments.pitch -180～180の適当な数値を指定する
+-----------------------------------------------------
+
+Meaning:
+Set pitch to any number from -180 to 180.
+
+Check:
+Use values such as 10 and -10.
+
+Pass:
+The API stores the pitch values.
+
+
+1-8 DBの値
+----------
+
+Common test values:
+- Use the facility_id returned by POST /facilities as <created_facility_id>.
+- Use the request values from the 1-6 maximum normal request.
+- Use the POST execution time as <post_time>.
+
+Common SQL:
+
+SELECT *
+FROM facilities_tree
+WHERE facility_id = <created_facility_id>;
+
+
+1-8-1 facility_id レスポンスと同じIDでデータが登録されている
+------------------------------------------------------------
+
+Description:
+The created facility row exists with the same ID as the API response.
+
+Test:
+Run the common SQL and confirm one row is returned.
+
+
+1-8-2 parent_id リクエストしたparent_idが設定されている
+------------------------------------------------------
+
+Description:
+The created facility has the requested parent_id.
+
+Test:
+Confirm parent_id = 1, or the parent_id used in the request.
+
+
+1-8-3 facility_name リクエストしたfacility_nameが設定されている
+---------------------------------------------------------------
+
+Description:
+The created facility has the requested facility_name.
+
+Test:
+Confirm facility_name = '最大正常施設'.
+
+
+1-8-4 facility_description リクエストしたfacility_descriptionが設定されている
+----------------------------------------------------------------------------
+
+Description:
+The created facility has the requested description, including newline text.
+
+Test:
+Confirm facility_description matches the request.
+
+
+1-8-5 sort_order 10000000である
+-------------------------------
+
+Description:
+The created facility sort_order is 10000000.
+
+Test:
+Confirm sort_order = 10000000.
+
+
+1-8-6 tree_level 2である
+------------------------
+
+Description:
+The created facility is one level under the parent.
+
+Test:
+Confirm tree_level = 2.
+
+
+1-8-7 is_leaf TRUEである
+------------------------
+
+Description:
+The new facility has no children yet.
+
+Test:
+Confirm is_leaf = true.
+
+
+1-8-8 public_flag 02である
+--------------------------
+
+Description:
+The public flag is stored from the request.
+
+Test:
+Confirm public_flag = '02'.
+
+
+1-8-9 outer_flag TRUEである
+---------------------------
+
+Description:
+The outdoor flag is stored from the request.
+
+Test:
+Confirm outer_flag = true.
+
+
+1-8-10 authority_setting_flag TRUEである
+---------------------------------------
+
+Description:
+The authority setting flag is stored from the request.
+
+Test:
+Confirm authority_setting_flg = true.
+
+
+1-8-11 created_at POSTした日時となっている
+-----------------------------------------
+
+Description:
+created_at is set to the API POST time.
+
+Test:
+Confirm created_at is close to <post_time>.
+
+
+1-8-12 updated_at POSTした日時となっている
+-----------------------------------------
+
+Description:
+updated_at is set to the API POST time.
+
+Test:
+Confirm updated_at is close to <post_time>.
+
+
+1-8-13 deleted_at NULLとなっている
+----------------------------------
+
+Description:
+The created facility is not deleted.
+
+Test:
+Confirm deleted_at IS NULL.
+
+
+1-8-14 他の施設ツリーテーブルのレコード Insert/Deleteなし
+---------------------------------------------------------
+
+Description:
+Only one facilities_tree row is inserted by this create request.
+
+Test:
+Compare facilities_tree count before and after. After count = before count + 1.
+
+
+1-8-15 親の施設ツリーレコードのis_leafがFalseに変わっている
+------------------------------------------------------------
+
+Description:
+The parent facility is no longer a leaf after adding a child.
+
+Test:
+SELECT is_leaf FROM facilities_tree WHERE facility_id = 1;
+Confirm is_leaf = false.
+
+
+1-8-16 親の施設ツリーレコードのupdated_atがPOST日時となっている
+---------------------------------------------------------------
+
+Description:
+The parent facility updated_at changes when a child is added.
+
+Test:
+Confirm parent updated_at is close to <post_time>.
+
+
+1-8-17 親の施設ツリーレコードのその他フィールドは変わっていない
+---------------------------------------------------------------
+
+Description:
+Only parent is_leaf and updated_at should change.
+
+Test:
+Compare parent row before and after except is_leaf and updated_at.
+
+
+1-8-18 親以外でupdated_atが同じ日時のレコードが無い
+---------------------------------------------------
+
+Description:
+No unrelated facilities_tree row is updated at the POST time.
+
+Test:
+SELECT COUNT(*) FROM facilities_tree
+WHERE facility_id NOT IN (1, <created_facility_id>)
+  AND updated_at = (SELECT updated_at FROM facilities_tree WHERE facility_id = 1);
+Confirm count = 0.
+
+
+1-8-19 vr_image FACILITY_IMAGESに1レコード存在する
+--------------------------------------------------
+
+Description:
+One VR image row is inserted for the created facility.
+
+Test:
+SELECT * FROM facility_images WHERE facility_id = <created_facility_id>;
+Confirm one row.
+
+
+1-8-20 vr_image.image_id 妥当な番号である
+----------------------------------------
+
+Description:
+image_id is auto-generated.
+
+Test:
+Confirm image_id is not null and positive.
+
+
+1-8-21 vr_image.facility_id レスポンスと同じID
+---------------------------------------------
+
+Description:
+facility_images.facility_id matches the response facility_id.
+
+Test:
+Confirm facility_id = <created_facility_id>.
+
+
+1-8-22 vr_image.file_id リクエスト指定値
+---------------------------------------
+
+Description:
+facility_images.file_id matches the requested VR file_id.
+
+Test:
+Confirm file_id = 201.
+
+
+1-8-23 vr_image.shooting_height_m 1600である
+-------------------------------------------
+
+Description:
+VR shooting height is stored from the request.
+
+Test:
+Confirm shooting_height_m = 1600.
+
+
+1-8-24 vr_image.ceiling_height_m 3000である
+------------------------------------------
+
+Description:
+VR ceiling height is stored from the request.
+
+Test:
+Confirm ceiling_height_m = 3000.
+
+
+1-8-25 vr_image.created_at POST日時
+----------------------------------
+
+Description:
+VR image created_at is set to the POST time.
+
+Test:
+Confirm created_at is close to <post_time>.
+
+
+1-8-26 vr_image.updated_at POST日時
+----------------------------------
+
+Description:
+VR image updated_at is set to the POST time.
+
+Test:
+Confirm updated_at is close to <post_time>.
+
+
+1-8-27 vr_image.deleted_at NULL
+-------------------------------
+
+Description:
+The VR image row is not deleted.
+
+Test:
+Confirm deleted_at IS NULL.
+
+
+1-8-28 vr_image その他のInsert/Update/Deleteなし
+------------------------------------------------
+
+Description:
+Only the expected VR image row is changed.
+
+Test:
+Compare facility_images count before and after. After count = before count + 1.
+
+
+1-8-29 map MAPSに1レコード存在する
+----------------------------------
+
+Description:
+One map row is inserted for the created facility.
+
+Test:
+SELECT * FROM maps WHERE facility_id = <created_facility_id>;
+Confirm one row.
+
+
+1-8-30 map.map_id 妥当な番号である
+---------------------------------
+
+Description:
+map_id is auto-generated.
+
+Test:
+Confirm map_id is not null and positive.
+
+
+1-8-31 map.facility_id レスポンスと同じID
+----------------------------------------
+
+Description:
+maps.facility_id matches the response facility_id.
+
+Test:
+Confirm facility_id = <created_facility_id>.
+
+
+1-8-32 map.file_id リクエスト指定値
+----------------------------------
+
+Description:
+maps.file_id matches the requested map file_id.
+
+Test:
+Confirm file_id = 202.
+
+
+1-8-33 map.map_name リクエスト指定ファイル名
+-------------------------------------------
+
+Description:
+map_name matches the requested map name.
+
+Test:
+Confirm map_name = 'map_sample.png'.
+
+
+1-8-34 map.image_width リクエスト指定値
+--------------------------------------
+
+Description:
+image_width matches the requested width.
+
+Test:
+Confirm image_width = 1920.
+
+
+1-8-35 map.image_height リクエスト指定値
+---------------------------------------
+
+Description:
+image_height matches the requested height.
+
+Test:
+Confirm image_height = 1080.
+
+
+1-8-36 map.created_at POST日時
+-----------------------------
+
+Description:
+Map created_at is set to the POST time.
+
+Test:
+Confirm created_at is close to <post_time>.
+
+
+1-8-37 map.updated_at POST日時
+-----------------------------
+
+Description:
+Map updated_at is set to the POST time.
+
+Test:
+Confirm updated_at is close to <post_time>.
+
+
+1-8-38 map.deleted_at NULL
+--------------------------
+
+Description:
+The map row is not deleted.
+
+Test:
+Confirm deleted_at IS NULL.
+
+
+1-8-39 map その他のInsert/Update/Deleteなし
+------------------------------------------
+
+Description:
+Only the expected map row is changed.
+
+Test:
+Compare maps count before and after. After count = before count + 1.
+
+
+1-8-40 map_point Insert/Update/Deleteなし
+----------------------------------------
+
+Description:
+No map_points rows are changed by this create request.
+
+Test:
+Compare map_points count before and after. Count must not change.
+
+
+1-8-41 roles リクエスト件数分存在する
+------------------------------------
+
+Description:
+Role permission rows are inserted for each requested role.
+
+Test:
+SELECT * FROM facility_role_permission WHERE facility_id = <created_facility_id>;
+Confirm count matches request roles count.
+
+
+1-8-42 roles.facility_role_permission_id 妥当な番号
+--------------------------------------------------
+
+Description:
+facility_role_permission_id is auto-generated.
+
+Test:
+Confirm each ID is not null and positive.
+
+
+1-8-43 roles.permission_id リクエスト指定値
+-----------------------------------------
+
+Description:
+permission_id matches the requested permission_code through PERMISSION_MASTER.
+
+Test:
+Join permission_master and confirm permission_name matches request.
+
+
+1-8-44 roles.facility_id レスポンスと同じID
+------------------------------------------
+
+Description:
+facility_role_permission.facility_id matches the response facility_id.
+
+Test:
+Confirm facility_id = <created_facility_id>.
+
+
+1-8-45 roles.keycloak_role_id リクエスト指定値
+---------------------------------------------
+
+Description:
+keycloak_role_id matches the requested role IDs.
+
+Test:
+Confirm keycloak_role_id values match viewer/editor or your request values.
+
+
+1-8-46 roles.created_at POST日時
+-------------------------------
+
+Description:
+Role created_at is set to the POST time.
+
+Test:
+Confirm created_at is close to <post_time>.
+
+
+1-8-47 roles.updated_at POST日時
+-------------------------------
+
+Description:
+Role updated_at is set to the POST time.
+
+Test:
+Confirm updated_at is close to <post_time>.
+
+
+1-8-48 roles.deleted_at NULL
+----------------------------
+
+Description:
+Role permission rows are not deleted.
+
+Test:
+Confirm deleted_at IS NULL.
+
+
+1-8-49 roles その他のInsert/Update/Deleteなし
+--------------------------------------------
+
+Description:
+Only the expected role rows are changed.
+
+Test:
+Compare facility_role_permission count before and after. Difference equals requested roles count.
+
+
+1-8-50 equipments リクエスト件数分存在する
+----------------------------------------
+
+Description:
+Equipment rows are inserted for each requested equipment.
+
+Test:
+SELECT * FROM equipments WHERE facility_id = <created_facility_id>;
+Confirm count matches request equipments count.
+
+
+1-8-51 equipments.content_id 妥当な番号
+--------------------------------------
+
+Description:
+content_id is auto-generated.
+
+Test:
+Confirm each content_id is not null and positive.
+
+
+1-8-52 equipments.facility_id レスポンスと同じID
+-----------------------------------------------
+
+Description:
+equipments.facility_id matches the response facility_id.
+
+Test:
+Confirm facility_id = <created_facility_id>.
+
+
+1-8-53 equipments.equipment_master_id リクエスト指定値
+-----------------------------------------------------
+
+Description:
+equipment_master_id matches the requested equipment_id.
+
+Test:
+Confirm equipment_master_id = 1, or the requested value.
+
+
+1-8-54 equipments.yaw リクエスト指定値
+-------------------------------------
+
+Description:
+yaw matches the request.
+
+Test:
+Confirm yaw = 45 or the requested yaw values.
+
+
+1-8-55 equipments.pitch リクエスト指定値
+---------------------------------------
+
+Description:
+pitch matches the request.
+
+Test:
+Confirm pitch = 10 or the requested pitch values.
+
+
+1-8-56 equipments.created_at POST日時
+------------------------------------
+
+Description:
+Equipment created_at is set to the POST time.
+
+Test:
+Confirm created_at is close to <post_time>.
+
+
+1-8-57 equipments.updated_at POST日時
+------------------------------------
+
+Description:
+Equipment updated_at is set to the POST time.
+
+Test:
+Confirm updated_at is close to <post_time>.
+
+
+1-8-58 equipments.deleted_at NULL
+---------------------------------
+
+Description:
+Equipment rows are not deleted.
+
+Test:
+Confirm deleted_at IS NULL.
+
+
+1-8-59 equipments その他のInsert/Update/Deleteなし
+-------------------------------------------------
+
+Description:
+Only the expected equipment rows are changed.
+
+Test:
+Compare equipments count before and after. Difference equals requested equipments count.
+
+
+1-8-60 annotations Insert/Update/Deleteなし
+------------------------------------------
+
+Description:
+No annotations rows are changed by this create request.
+
+Test:
+Compare annotations count before and after. Count must not change.
+
+
+1-9 リクエストパラメータ（target_facility_idを指定した場合）
+-----------------------------------------------------------
+
+Meaning:
+This test creates a new facility by specifying target_facility_id. The new facility should be placed after the target facility under the same parent.
+
+Postman:
+POST http://localhost:8081/facilities
+
+Headers:
+Authorization: Bearer <SYS_ADMIN access token>
+Content-Type: application/json
+
+Example request body:
+
+{
+  "facility_name": "target指定施設",
+  "target_facility_id": <facility_id_created_in_1_6>,
+  "parent_id": <facility_id_created_in_1_4_1>,
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true
+}
+
+For this API condition, target_facility_id must be an existing child of the same parent_id.
+So this must be true in DB:
+
+SELECT facility_id, parent_id, facility_name, sort_order
+FROM facilities_tree
+WHERE parent_id = 1
+  AND deleted_at IS NULL
+ORDER BY sort_order;
+
+Then choose one returned facility_id as target_facility_id.
+Example, if this query returns facility_id = 6, use:
+
+{
+  "facility_name": "target指定施設",
+  "target_facility_id": 6,
+  "parent_id": 1,
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true
+}
+
+
+1-9-1 facility_name 適当な施設名を設定する
+-----------------------------------------
+
+Description:
+Set any valid facility name.
+
+Test:
+Use "target指定施設" as facility_name.
+
+
+1-9-2 target_facility_id No.6で登録したfacility_idを指定する
+-----------------------------------------------------------
+
+Description:
+Use the facility_id created in the 1-6 normal maximum request as target_facility_id.
+
+Test:
+Confirm target_facility_id exists under the same parent_id.
+
+
+1-9-3 parent_id 1-4-1で登録したfacility_idを指定する
+---------------------------------------------------
+
+Description:
+Use the parent facility created in 1-4-1 as parent_id.
+
+Test:
+Confirm parent_id exists and is the same parent as target_facility_id.
+
+
+1-10-1 レスポンス
+-----------------
+
+Description:
+The API returns success and the new facility_id.
+
+Expected:
+200 OK
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1002
+  }
+}
+
+Test:
+Use the returned facility_id for DB checks.
+
+
+1-11 DBの値
+-----------
+
+Common SQL:
+
+SELECT *
+FROM facilities_tree
+WHERE facility_id = <created_facility_id>;
+
+
+1-11-1 facility_id レスポンスと同じIDでデータが登録されている
+------------------------------------------------------------
+
+Description:
+The created facility row exists with the same ID as the API response.
+
+Test:
+Run the common SQL and confirm one row is returned.
+
+
+1-11-2 parent_id リクエストしたparent_idが設定されている
+------------------------------------------------------
+
+Description:
+The created facility has the same parent_id as the request.
+
+Test:
+Confirm parent_id = <requested_parent_id>.
+
+
+1-11-3 facility_name リクエストしたfacility_nameが設定されている
+---------------------------------------------------------------
+
+Description:
+The created facility has the same facility_name as the request.
+
+Test:
+Confirm facility_name = 'target指定施設'.
+
+
+1-11-4 sort_order target_facility_id指定時の計算値
+--------------------------------------------------
+
+Description:
+sort_order is calculated from the target facility and the next facility under the same parent.
+
+Rule:
+1. Get target sort_order:
+
+SELECT sort_order
+FROM facilities_tree
+WHERE parent_id = <requested_parent_id>
+  AND facility_id = <target_facility_id>
+  AND deleted_at IS NULL;
+
+If this returns 0 rows, the API should return an error.
+
+2. Get the next sort_order:
+
+SELECT sort_order
+FROM facilities_tree
+WHERE parent_id = <requested_parent_id>
+  AND facility_id > <target_facility_id>
+  AND deleted_at IS NULL
+ORDER BY facility_id ASC
+LIMIT 1;
+
+Expected:
+- If there is no next row, new sort_order = target_sort_order + 10000000.
+- If there is a next row, new sort_order = (target_sort_order + next_sort_order) / 2.
+
+Test:
+Confirm the created facility sort_order equals the expected calculated value.
+
+
+12 リクエストパラメータ（target_facility_idを指定した場合）
+----------------------------------------------------------
+
+Description:
+Create a facility while specifying target_facility_id. The new facility is inserted after the target facility under the same parent.
+
+Postman:
+POST http://localhost:8081/facilities
+
+Headers:
+Authorization: Bearer <SYS_ADMIN access token>
+Content-Type: application/json
+
+Example request body:
+
+{
+  "facility_name": "target指定施設",
+  "target_facility_id": 2,
+  "parent_id": 1,
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true
+}
+
+
+12-1 facility_name 適当な施設名を設定する
+----------------------------------------
+
+Description:
+Set any valid facility name.
+
+Test:
+Use a normal facility name, for example "target指定施設".
+
+
+12-2 target_facility_id No.6で登録したfacility_idを指定する
+----------------------------------------------------------
+
+Description:
+Use the facility_id created in No.6 as target_facility_id.
+
+Test:
+Confirm the target facility exists under the same parent_id.
+
+
+12-3 parent_id 1-4-1で登録したfacility_idを指定する
+--------------------------------------------------
+
+Description:
+Use the parent facility created in 1-4-1 as parent_id.
+
+Test:
+Confirm parent_id exists and matches the target facility parent.
+
+
+13 レスポンス
+-------------
+
+Description:
+The API returns a successful response with the newly created facility_id.
+
+
+13-1 レスポンス内容
+------------------
+
+Expected:
+200 OK
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1002
+  }
+}
+
+Test:
+Confirm success is true and data.facility_id is returned.
+
+
+14 DBの値
+---------
+
+Common SQL:
+
+SELECT *
+FROM facilities_tree
+WHERE facility_id = <created_facility_id>;
+
+
+14-1 facility_id レスポンスと同じIDでデータが登録されている
+---------------------------------------------------------
+
+Description:
+The created facility row exists with the same ID as the API response.
+
+Test:
+Run the common SQL and confirm one row is returned.
+
+
+14-2 parent_id リクエストしたparent_idが設定されている
+----------------------------------------------------
+
+Description:
+The created facility has the requested parent_id.
+
+Test:
+Confirm parent_id = <requested_parent_id>.
+
+
+14-3 facility_name リクエストしたfacility_nameが設定されている
+-------------------------------------------------------------
+
+Description:
+The created facility has the requested facility_name.
+
+Test:
+Confirm facility_name = 'target指定施設'.
+
+
+14-4 sort_order target_facility_id指定時の計算値
+------------------------------------------------
+
+Description:
+The new sort_order is calculated from the target facility and the next facility under the same parent.
+
+Meaning:
+First, get the target facility sort_order. This is value ①.
+Second, get the next facility sort_order under the same parent. This is value ②.
+If ② does not exist, the new facility is placed at the end.
+If ② exists, the new facility is placed between ① and ②.
+
+SQL for ①:
+
+SELECT sort_order
+FROM facilities_tree
+WHERE parent_id = <requested_parent_id>
+  AND facility_id = <target_facility_id>
+  AND deleted_at IS NULL;
+
+SQL for ②:
+
+SELECT sort_order
+FROM facilities_tree
+WHERE parent_id = <requested_parent_id>
+  AND facility_id > <target_facility_id>
+  AND deleted_at IS NULL
+ORDER BY facility_id ASC
+LIMIT 1;
+
+Expected:
+- If ② does not exist: new sort_order = ① sort_order + 10000000.
+- If ② exists: new sort_order = (① sort_order + ② sort_order) / 2.
+
+Example:
+If ① = 10000000 and ② does not exist, new sort_order = 20000000.
+If ① = 10000000 and ② = 20000000, new sort_order = 15000000.
+
+Test:
+Confirm the created facility sort_order equals the expected calculated value.
+
+
+1-15 リクエストパラメータ（親の施設にmapデータがある場合：異常時）
+-----------------------------------------------------------------
+
+Description:
+Use the normal test data from section 16, but change part of map_points to invalid values.
+This case assumes the parent facility already has map data.
+
+Postman:
+POST http://localhost:8081/facilities
+
+Headers:
+Authorization: Bearer <SYS_ADMIN access token>
+Content-Type: application/json
+
+Expected error:
+400 Bad Request
+
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+
+1-15-1 map_pointsに複数のデータを指定する
+----------------------------------------
+
+Description:
+During facility creation, map_points should contain only the position data for this new facility. Multiple map_points are invalid.
+
+Example request body:
+
+{
+  "facility_name": "map_points複数エラー施設",
+  "parent_id": 1,
+  "target_facility_id": null,
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "map_points": [
+    {
+      "x": 100,
+      "y": 200
+    },
+    {
+      "x": 300,
+      "y": 400
+    }
+  ]
+}
+
+Test:
+Send the request and confirm the API returns invalid_request.
+
+
+1-15-2 子フィールドがxのみ、yのみしか無い
+----------------------------------------
+
+Description:
+Each map_points item must have both x and y. If only x or only y is sent, the request is invalid.
+
+Example request body with only x:
+
+{
+  "facility_name": "map_points片方エラー施設",
+  "parent_id": 1,
+  "target_facility_id": null,
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "map_points": [
+    {
+      "x": 100
+    }
+  ]
+}
+
+Example request body with only y:
+
+{
+  "facility_name": "map_points片方エラー施設",
+  "parent_id": 1,
+  "target_facility_id": null,
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "map_points": [
+    {
+      "y": 200
+    }
+  ]
+}
+
+Test:
+Send each request and confirm the API returns invalid_request.
+
+
+1-16 リクエストパラメータ（親の施設にmapデータがある場合）
+----------------------------------------------------------
+
+Description:
+Create a facility under a parent that already has map data, and send one map_points item for the new facility position.
+
+Postman:
+POST http://localhost:8081/facilities
+
+Headers:
+Authorization: Bearer <SYS_ADMIN access token>
+Content-Type: application/json
+
+Example request body:
+
+{
+  "facility_name": "map_points正常施設",
+  "target_facility_id": 6,
+  "parent_id": 1,
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "map_points": [
+    {
+      "x": 50,
+      "y": -30
+    }
+  ]
+}
+
+Before test SQL:
+
+SELECT map_id
+FROM maps
+WHERE facility_id = 1
+  AND deleted_at IS NULL;
+
+Expected:
+The parent facility has one map row.
+
+Troubleshooting if Postman returns 500:
+
+If the error says INSERT INTO map_points failed, first check whether the map_points table exists and has the required columns.
+
+Check columns:
+
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'map_points'
+ORDER BY ordinal_position;
+
+If this returns no rows, create the table:
+
+CREATE TABLE IF NOT EXISTS map_points (
+  map_point_id BIGSERIAL PRIMARY KEY,
+  map_id BIGINT NOT NULL REFERENCES maps(map_id),
+  facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
+  x DOUBLE PRECISION NOT NULL,
+  y DOUBLE PRECISION NOT NULL,
+  target_type VARCHAR(128) NOT NULL,
+  target_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMPTZ
+);
+
+Then send the same Postman request again.
+
+
+1-16-1 facility_name 適当な施設名を設定する
+------------------------------------------
+
+Description:
+Set any valid facility name.
+
+Test:
+Use "map_points正常施設".
+
+
+1-16-2 target_facility_id 1-7-1のレスポンスfacility_idを指定する
+----------------------------------------------------------------
+
+Description:
+Use the facility_id returned in 1-7-1 as target_facility_id.
+
+Test:
+Confirm target_facility_id exists under the same parent_id.
+
+
+1-16-3 parent_id 1-4-1で登録したfacility_idを指定する
+----------------------------------------------------
+
+Description:
+Use the parent facility created in 1-4-1.
+
+Test:
+Use parent_id = 1.
+
+
+1-16-4 map_points 下位のデータを1件登録する
+------------------------------------------
+
+Description:
+Send exactly one map_points item.
+
+Test:
+Confirm the request has one item in map_points.
+
+
+1-16-5 map_points.x -100～100以内の数値を指定する
+------------------------------------------------
+
+Description:
+Set x to a valid value between -100 and 100.
+
+Test:
+Use "x": 50.
+
+
+1-16-6 map_points.y -100～100以内の数値を指定する
+------------------------------------------------
+
+Description:
+Set y to a valid value between -100 and 100.
+
+Test:
+Use "y": -30.
+
+
+1-17 レスポンス
+---------------
+
+Description:
+The API returns a successful response with the newly created facility_id.
+
+
+1-17-1 レスポンス内容
+--------------------
+
+Expected:
+200 OK
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1002
+  }
+}
+
+Test:
+Confirm success is true and data.facility_id is returned.
+
+
+1-18 DBの値
+-----------
+
+Common SQL:
+
+SELECT *
+FROM facilities_tree
+WHERE facility_id = <created_facility_id>;
+
+SELECT *
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+
+1-18-1 facility_id レスポンスと同じIDでデータが登録されている
+------------------------------------------------------------
+
+Description:
+The created facility row exists with the same ID as the API response.
+
+Test:
+Run the facilities_tree common SQL and confirm one row is returned.
+
+
+1-18-2 parent_id リクエストしたparent_idが設定されている
+------------------------------------------------------
+
+Description:
+The created facility has the requested parent_id.
+
+Test:
+Confirm parent_id = 1.
+
+
+1-18-3 facility_name リクエストしたfacility_nameが設定されている
+---------------------------------------------------------------
+
+Description:
+The created facility has the requested facility_name.
+
+Test:
+Confirm facility_name = 'map_points正常施設'.
+
+
+1-18-4 map_points リクエストした1件分存在する
+--------------------------------------------
+
+Description:
+One map_points row is inserted for the created facility.
+
+Test:
+Run the map_points common SQL and confirm one row is returned.
+
+
+1-18-5 map_points.map_point_id 妥当な番号である
+-----------------------------------------------
+
+Description:
+map_point_id is auto-generated.
+
+Test:
+Confirm map_point_id is not null and positive.
+
+
+1-18-6 map_points.map_id 親施設のmap_idが設定されている
+------------------------------------------------------
+
+Description:
+map_id should be the map_id from the parent facility map.
+
+SQL:
+
+SELECT map_id
+FROM maps
+WHERE facility_id = 1
+  AND deleted_at IS NULL;
+
+Test:
+Confirm map_points.map_id matches this map_id.
+
+
+1-18-7 map_points.facility_id リクエストしたparent_idが登録されている
+--------------------------------------------------------------------
+
+Description:
+map_points.facility_id stores the parent facility_id.
+
+Test:
+Confirm map_points.facility_id = 1.
+
+
+1-18-8 map_points.target_id レスポンスと同じIDで登録されている
+-------------------------------------------------------------
+
+Description:
+target_id stores the newly created facility_id.
+
+Test:
+Confirm target_id = <created_facility_id>.
+
+
+1-18-9 map_points.x リクエストしたxが登録されている
+--------------------------------------------------
+
+Description:
+x is stored from the request.
+
+Test:
+Confirm x = 50.
+
+
+1-18-10 map_points.y リクエストしたyが登録されている
+---------------------------------------------------
+
+Description:
+y is stored from the request.
+
+Test:
+Confirm y = -30.
+
+
+1-18-11 map_points.created_at POST日時
+-------------------------------------
+
+Description:
+map_points.created_at is set to the POST time.
+
+Test:
+Confirm created_at is close to the POST time.
+
+
+1-18-12 map_points.updated_at POST日時
+-------------------------------------
+
+Description:
+map_points.updated_at is set to the POST time.
+
+Test:
+Confirm updated_at is close to the POST time.
+
+
+1-18-13 map_points.deleted_at NULL
+----------------------------------
+
+Description:
+The map_points row is not deleted.
+
+Test:
+Confirm deleted_at IS NULL.
+
+
+1-18-14 map_points その他のInsert/Update/Deleteなし
+---------------------------------------------------
+
+Description:
+Only the expected map_points row is changed by this create request.
+
+Test:
+Compare map_points count before and after. Difference should be 1, and unrelated rows should not have updated_at equal to the POST time.

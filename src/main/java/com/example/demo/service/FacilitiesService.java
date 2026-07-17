@@ -1,6 +1,7 @@
 package com.example.demo.service;
 
 import com.example.demo.exception.KeycloakAdminException;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -34,12 +35,12 @@ public class FacilitiesService {
         FacilityRecord facility = new FacilityRecord();
         facility.facilityId = rs.getLong("facility_id");
         facility.parentId = nullableLong(rs, "parent_id");
-        facility.facilityName = rs.getString("node_name");
+        facility.facilityName = rs.getString("facility_name");
         facility.treeLevel = nullableInteger(rs, "tree_level");
         facility.isLeaf = rs.getBoolean("is_leaf");
         facility.publishMode = toPublishMode(rs.getString("public_flag"));
         facility.isOutdoor = rs.getBoolean("outer_flag");
-        facility.detail = rs.getString("node_description");
+        facility.detail = rs.getString("facility_description");
         facility.hasPermission = rs.getBoolean("authority_setting_flg");
         facility.createdAt = toLocalDateTime(rs.getTimestamp("created_at"));
         facility.updatedAt = toLocalDateTime(rs.getTimestamp("updated_at"));
@@ -67,7 +68,7 @@ public class FacilitiesService {
             sql.append(" AND parent_id = ?");
             params = List.of(parentId);
         } else if (keyword != null && !keyword.isBlank()) {
-            sql.append(" AND node_name LIKE ?");
+            sql.append(" AND facility_name LIKE ?");
             params = List.of("%" + keyword + "%");
         } else {
             params = Collections.emptyList();
@@ -99,32 +100,36 @@ public class FacilitiesService {
 
     @Transactional
     public Map<String, Object> createFacility(Map<String, Object> request) {
-        Long parentId = asLong(request.get("parent_id"));
+        validateCreateRequestKeys(request);
+
+        Long parentId = optionalLong(request.get("parent_id"));
         FacilityRecord parent = parentId == null ? null : getActiveFacility(parentId);
-        String facilityName = requiredString(request, "facility_name");
-        String publicFlag = toPublicFlag(stringValue(request.get("publish_mode")));
-        boolean isOutdoor = Boolean.TRUE.equals(asBoolean(request.get("is_outdoor")));
-        String detail = stringValue(request.get("detail"));
+        Long targetFacilityId = optionalLong(request.get("target_facility_id"));
+        String facilityName = requiredFacilityName(request);
+        String publicFlag = resolvePublicFlag(request);
+        boolean isOutdoor = optionalBoolean(request.getOrDefault("outer_flag", request.get("is_outdoor")), false);
+        boolean hasPermission = optionalBoolean(request.get("authority_setting_flag"), false);
+        String detail = optionalDescription(request);
         int treeLevel = parent == null || parent.treeLevel == null ? 1 : parent.treeLevel + 1;
-        int sortOrder = nextSortOrder(parentId);
+        int sortOrder = createSortOrder(parentId, targetFacilityId);
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement("""
                     INSERT INTO facilities_tree (
                         parent_id,
-                        node_name,
+                        facility_name,
                         sort_order,
                         tree_level,
                         is_leaf,
                         public_flag,
                         outer_flag,
-                        node_description,
+                        facility_description,
                         authority_setting_flg,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, TRUE, ?, ?, ?, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, TRUE, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """, new String[]{"facility_id"});
             if (parentId == null) {
                 ps.setObject(1, null);
@@ -137,13 +142,17 @@ public class FacilitiesService {
             ps.setString(5, publicFlag);
             ps.setBoolean(6, isOutdoor);
             ps.setString(7, detail);
+            ps.setBoolean(8, hasPermission);
             return ps;
         }, keyHolder);
 
         Long facilityId = Objects.requireNonNull(keyHolder.getKey()).longValue();
+        insertCreateChildren(facilityId, parentId, request);
         updateParentLeafState(parentId);
 
-        return toDetailResponse(getActiveFacility(facilityId));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("facility_id", facilityId);
+        return data;
     }
 
     @Transactional
@@ -156,7 +165,7 @@ public class FacilitiesService {
         if (request.containsKey("facility_name")) {
             jdbcTemplate.update("""
                     UPDATE facilities_tree
-                       SET node_name = ?, updated_at = CURRENT_TIMESTAMP
+                       SET facility_name = ?, updated_at = CURRENT_TIMESTAMP
                      WHERE facility_id = ? AND deleted_at IS NULL
                     """, requiredString(request, "facility_name"), facilityId);
         }
@@ -180,7 +189,7 @@ public class FacilitiesService {
         if (request.containsKey("detail")) {
             jdbcTemplate.update("""
                     UPDATE facilities_tree
-                       SET node_description = ?, updated_at = CURRENT_TIMESTAMP
+                       SET facility_description = ?, updated_at = CURRENT_TIMESTAMP
                      WHERE facility_id = ? AND deleted_at IS NULL
                     """, stringValue(request.get("detail")), facilityId);
         }
@@ -250,13 +259,13 @@ public class FacilitiesService {
             PreparedStatement ps = connection.prepareStatement("""
                     INSERT INTO facilities_tree (
                         parent_id,
-                        node_name,
+                        facility_name,
                         sort_order,
                         tree_level,
                         is_leaf,
                         public_flag,
                         outer_flag,
-                        node_description,
+                        facility_description,
                         authority_setting_flg,
                         created_at,
                         updated_at
@@ -343,12 +352,12 @@ public class FacilitiesService {
     }
 
     private List<Map<String, Object>> getImages(Long facilityId) {
-        return jdbcTemplate.query("""
+        return safeQuery("""
                 SELECT image_id,
                        file_id,
                        image_name,
-                       shooting_height_m,
-                       ceiling_height_m
+                       shooting_height,
+                       ceiling_height
                   FROM facility_images
                  WHERE facility_id = ?
                    AND deleted_at IS NULL
@@ -358,14 +367,14 @@ public class FacilitiesService {
             data.put("image_id", rs.getLong("image_id"));
             data.put("file_id", rs.getLong("file_id"));
             data.put("image_name", rs.getString("image_name"));
-            data.put("shooting_height_m", rs.getBigDecimal("shooting_height_m"));
-            data.put("ceiling_height_m", rs.getBigDecimal("ceiling_height_m"));
+            data.put("shooting_height", rs.getInt("shooting_height"));
+            data.put("ceiling_height", rs.getInt("ceiling_height"));
             return data;
         }, facilityId);
     }
 
     private List<Map<String, Object>> getMaps(Long facilityId) {
-        return jdbcTemplate.query("""
+        return safeQuery("""
                 SELECT m.map_id,
                        m.file_id,
                        m.map_name
@@ -389,7 +398,7 @@ public class FacilitiesService {
     }
 
     private List<Map<String, Object>> getMapPoints(Long facilityId) {
-        return jdbcTemplate.query("""
+        return safeQuery("""
                 SELECT mp.map_point_id,
                        mp.map_id,
                        mp.x,
@@ -420,7 +429,7 @@ public class FacilitiesService {
     }
 
     private List<Map<String, Object>> getRoles(Long facilityId) {
-        return jdbcTemplate.query("""
+        return safeQuery("""
                 SELECT frp.keycloak_role_id,
                        frp.keycloak_role_name,
                        pm.permission_name
@@ -441,8 +450,8 @@ public class FacilitiesService {
     }
 
     private List<Map<String, Object>> getEquipments(Long facilityId) {
-        return jdbcTemplate.query("""
-                SELECT e.content_id,
+        return safeQuery("""
+                SELECT e.equipment_id,
                        em.equipment_name,
                        e.yaw,
                        e.pitch
@@ -455,10 +464,10 @@ public class FacilitiesService {
                    AND ft.deleted_at IS NULL
                    AND e.deleted_at IS NULL
                    AND em.deleted_at IS NULL
-                 ORDER BY e.content_id ASC
+                 ORDER BY e.equipment_id ASC
                 """, (rs, rowNum) -> {
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("equipment_id", rs.getLong("content_id"));
+            data.put("equipment_id", rs.getLong("equipment_id"));
             data.put("equipment_name", rs.getString("equipment_name"));
             data.put("vr_x", rs.getDouble("yaw"));
             data.put("vr_y", rs.getDouble("pitch"));
@@ -467,7 +476,7 @@ public class FacilitiesService {
     }
 
     private List<Map<String, Object>> getAnnotations(Long facilityId) {
-        return jdbcTemplate.query("""
+        return safeQuery("""
                 SELECT a.annotation_id,
                        a.annotation_title,
                        a.annotation_type
@@ -535,8 +544,24 @@ public class FacilitiesService {
     }
 
     private int count(String sql, Object... args) {
-        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, args);
-        return count == null ? 0 : count;
+        try {
+            Integer count = jdbcTemplate.queryForObject(sql, Integer.class, args);
+            return count == null ? 0 : count;
+        } catch (BadSqlGrammarException exception) {
+            return 0;
+        }
+    }
+
+    private List<Map<String, Object>> safeQuery(
+            String sql,
+            RowMapper<Map<String, Object>> rowMapper,
+            Object... args
+    ) {
+        try {
+            return jdbcTemplate.query(sql, rowMapper, args);
+        } catch (BadSqlGrammarException exception) {
+            return List.of();
+        }
     }
 
     private String toAnnotationType(String annotationType) {
@@ -586,6 +611,474 @@ public class FacilitiesService {
         }
 
         return (maxSortOrder == null ? 0 : maxSortOrder) + 10;
+    }
+
+    private int createSortOrder(Long parentId, Long targetFacilityId) {
+        if (targetFacilityId == null) {
+            Integer maxSortOrder;
+
+            if (parentId == null) {
+                maxSortOrder = jdbcTemplate.queryForObject("""
+                        SELECT COALESCE(MAX(sort_order), 0)
+                          FROM facilities_tree
+                         WHERE parent_id IS NULL
+                           AND deleted_at IS NULL
+                        """, Integer.class);
+            } else {
+                maxSortOrder = jdbcTemplate.queryForObject("""
+                        SELECT COALESCE(MAX(sort_order), 0)
+                          FROM facilities_tree
+                         WHERE parent_id = ?
+                           AND deleted_at IS NULL
+                        """, Integer.class, parentId);
+            }
+
+            return (maxSortOrder == null ? 0 : maxSortOrder) + 10_000_000;
+        }
+
+        List<Integer> targetSortOrders = jdbcTemplate.query("""
+                SELECT sort_order
+                  FROM facilities_tree
+                 WHERE facility_id = ?
+                   AND ((? IS NULL AND parent_id IS NULL) OR parent_id = ?)
+                   AND deleted_at IS NULL
+                """, (rs, rowNum) -> rs.getInt("sort_order"), targetFacilityId, parentId, parentId);
+
+        if (targetSortOrders.isEmpty()) {
+            throw invalidRequest("target_facility_id is invalid");
+        }
+
+        Integer targetSortOrder = targetSortOrders.getFirst();
+
+        Integer nextSortOrder = jdbcTemplate.queryForObject("""
+                SELECT MIN(sort_order)
+                  FROM facilities_tree
+                 WHERE ((? IS NULL AND parent_id IS NULL) OR parent_id = ?)
+                   AND sort_order > ?
+                   AND deleted_at IS NULL
+                """, Integer.class, parentId, parentId, targetSortOrder);
+
+        if (nextSortOrder == null) {
+            return targetSortOrder + 10_000_000;
+        }
+
+        return targetSortOrder + Math.max(1, (nextSortOrder - targetSortOrder) / 2);
+    }
+
+    private void insertCreateChildren(
+            Long facilityId,
+            Long parentId,
+            Map<String, Object> request
+    ) {
+        insertVrImage(facilityId, objectList(request.get("vr_image"), "vr_image", 1));
+        insertMap(facilityId, objectValue(request.get("map"), "map", false));
+        insertRoles(facilityId, objectList(request.get("roles"), "roles", Integer.MAX_VALUE));
+        insertEquipments(facilityId, objectList(request.get("equipments"), "equipments", Integer.MAX_VALUE));
+        insertMapPoint(facilityId, parentId, objectList(request.get("map_points"), "map_points", 1));
+    }
+
+    private void insertVrImage(
+            Long facilityId,
+            List<Map<String, Object>> vrImages
+    ) {
+        for (Map<String, Object> image : vrImages) {
+            Long fileId = requiredLong(image, "file_id");
+            ensureFileExists(fileId);
+            String imageName = requiredLimitedString(image, "image_name", 256);
+            Integer shootingHeight = positiveInteger(image.get("shooting_height"), "shooting_height");
+            Integer ceilingHeight = positiveInteger(image.get("ceiling_height"), "ceiling_height");
+
+            jdbcTemplate.update("""
+                    INSERT INTO facility_images (
+                        facility_id,
+                        file_id,
+                        image_name,
+                        shooting_height,
+                        ceiling_height,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, facilityId, fileId, imageName, shootingHeight, ceilingHeight);
+        }
+    }
+
+    private void insertMap(
+            Long facilityId,
+            Map<String, Object> map
+    ) {
+        if (map == null) {
+            return;
+        }
+
+        Long fileId = requiredLong(map, "file_id");
+        ensureFileExists(fileId);
+        String mapName = requiredLimitedString(map, "map_name", 256);
+        Integer imageWidth = positiveInteger(map.get("image_width"), "image_width");
+        Integer imageHeight = positiveInteger(map.get("image_height"), "image_height");
+
+        jdbcTemplate.update("""
+                INSERT INTO maps (
+                    facility_id,
+                    file_id,
+                    map_name,
+                    image_width,
+                    image_height,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, facilityId, fileId, mapName, imageWidth, imageHeight);
+    }
+
+    private void insertRoles(
+            Long facilityId,
+            List<Map<String, Object>> roles
+    ) {
+        for (Map<String, Object> role : roles) {
+            String keycloakRoleId = requiredLimitedString(role, "keycloak_role_id", 64);
+
+            if ("SYS_ADMIN".equals(keycloakRoleId)) {
+                throw invalidRequest("keycloak_role_id is invalid");
+            }
+
+            Long permissionId = permissionId(requiredString(role, "permission_code"));
+
+            jdbcTemplate.update("""
+                    INSERT INTO facility_role_permission (
+                        permission_id,
+                        facility_id,
+                        keycloak_role_id,
+                        keycloak_role_name,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, permissionId, facilityId, keycloakRoleId, keycloakRoleId);
+        }
+    }
+
+    private void insertEquipments(
+            Long facilityId,
+            List<Map<String, Object>> equipments
+    ) {
+        for (Map<String, Object> equipment : equipments) {
+            Long equipmentMasterId = requiredLong(equipment, "equipment_id");
+            ensureEquipmentMasterExists(equipmentMasterId);
+            double yaw = rangedDouble(equipment.get("yaw"), "yaw");
+            double pitch = rangedDouble(equipment.get("pitch"), "pitch");
+
+            jdbcTemplate.update("""
+                    INSERT INTO equipments (
+                        facility_id,
+                        equipment_master_id,
+                        yaw,
+                        pitch,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, facilityId, equipmentMasterId, yaw, pitch);
+        }
+    }
+
+    private void insertMapPoint(
+            Long facilityId,
+            Long parentId,
+            List<Map<String, Object>> mapPoints
+    ) {
+        if (mapPoints.isEmpty()) {
+            return;
+        }
+
+        if (parentId == null) {
+            throw invalidRequest("map_points is invalid");
+        }
+
+        Long mapId = jdbcTemplate.query("""
+                SELECT map_id
+                  FROM maps
+                 WHERE facility_id = ?
+                   AND deleted_at IS NULL
+                 ORDER BY map_id ASC
+                 LIMIT 1
+                """, rs -> rs.next() ? rs.getLong("map_id") : null, parentId);
+
+        if (mapId == null) {
+            throw invalidRequest("map_points is invalid");
+        }
+
+        Map<String, Object> point = mapPoints.getFirst();
+        double x = coordinate(point.get("x"), "x");
+        double y = coordinate(point.get("y"), "y");
+
+        jdbcTemplate.update("""
+                INSERT INTO map_points (
+                    map_id,
+                    facility_id,
+                    x,
+                    y,
+                    target_id,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, mapId, parentId, x, y, facilityId);
+    }
+
+    private void validateCreateRequestKeys(Map<String, Object> request) {
+        if (request.containsKey("annotations")) {
+            throw invalidRequest("annotations is invalid");
+        }
+    }
+
+    private String requiredFacilityName(Map<String, Object> request) {
+        String facilityName = requiredString(request, "facility_name");
+
+        if (facilityName.length() > 100
+                || facilityName.chars().anyMatch(Character::isISOControl)) {
+            throw invalidRequest("facility_name is invalid");
+        }
+
+        return facilityName;
+    }
+
+    private String optionalDescription(Map<String, Object> request) {
+        String description = stringValue(request.getOrDefault("facility_description", request.get("detail")));
+
+        if (description != null && description.length() > 500) {
+            throw invalidRequest("facility_description is invalid");
+        }
+
+        return description;
+    }
+
+    private String resolvePublicFlag(Map<String, Object> request) {
+        Object publicFlag = request.get("public_flag");
+
+        if (publicFlag != null) {
+            String value = publicFlag.toString();
+
+            if (!List.of("01", "02", "03").contains(value)) {
+                throw invalidRequest("public_flag is invalid");
+            }
+
+            return value;
+        }
+
+        return toPublicFlag(stringValue(request.get("publish_mode")));
+    }
+
+    private void ensureFileExists(Long fileId) {
+        if (count("""
+                SELECT COUNT(*)
+                  FROM files
+                 WHERE file_id = ?
+                   AND deleted_at IS NULL
+                """, fileId) == 0) {
+            throw invalidRequest("file_id is invalid");
+        }
+    }
+
+    private void ensureEquipmentMasterExists(Long equipmentMasterId) {
+        if (count("""
+                SELECT COUNT(*)
+                  FROM equipment_masters
+                 WHERE equipment_master_id = ?
+                   AND deleted_at IS NULL
+                """, equipmentMasterId) == 0) {
+            throw invalidRequest("equipment_id is invalid");
+        }
+    }
+
+    private Long permissionId(String permissionCode) {
+        List<Long> results = jdbcTemplate.query("""
+                SELECT permission_id
+                  FROM permission_master
+                 WHERE permission_name = ?
+                   AND deleted_at IS NULL
+                """, (rs, rowNum) -> rs.getLong("permission_id"), permissionCode);
+
+        if (results.isEmpty()) {
+            throw invalidRequest("permission_code is invalid");
+        }
+
+        return results.getFirst();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> objectList(
+            Object value,
+            String key,
+            int maxSize
+    ) {
+        if (value == null) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> values;
+
+        if (value instanceof Map<?, ?> map) {
+            values = List.of((Map<String, Object>) map);
+        } else if (value instanceof List<?> list) {
+            values = list.stream()
+                    .map(item -> {
+                        if (!(item instanceof Map<?, ?> itemMap)) {
+                            throw invalidRequest(key + " is invalid");
+                        }
+
+                        return (Map<String, Object>) itemMap;
+                    })
+                    .toList();
+        } else {
+            throw invalidRequest(key + " is invalid");
+        }
+
+        if (values.size() > maxSize) {
+            throw invalidRequest(key + " is invalid");
+        }
+
+        return values;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> objectValue(
+            Object value,
+            String key,
+            boolean required
+    ) {
+        if (value == null) {
+            if (required) {
+                throw invalidRequest(key + " is required");
+            }
+
+            return null;
+        }
+
+        if (!(value instanceof Map<?, ?> map)) {
+            throw invalidRequest(key + " is invalid");
+        }
+
+        return (Map<String, Object>) map;
+    }
+
+    private String requiredLimitedString(
+            Map<String, Object> request,
+            String key,
+            int maxLength
+    ) {
+        String value = requiredString(request, key);
+
+        if (value.length() > maxLength
+                || value.chars().anyMatch(Character::isISOControl)) {
+            throw invalidRequest(key + " is invalid");
+        }
+
+        return value;
+    }
+
+    private Integer positiveInteger(
+            Object value,
+            String key
+    ) {
+        Long number = requiredLongValue(value, key);
+
+        if (number <= 0 || number > Integer.MAX_VALUE) {
+            throw invalidRequest(key + " is invalid");
+        }
+
+        return number.intValue();
+    }
+
+    private double rangedDouble(
+            Object value,
+            String key
+    ) {
+        double number = requiredDouble(value, key);
+
+        if (number < -180 || number > 180) {
+            throw invalidRequest(key + " is invalid");
+        }
+
+        return number;
+    }
+
+    private double coordinate(
+            Object value,
+            String key
+    ) {
+        double number = requiredDouble(value, key);
+
+        if (number < -100 || number > 100) {
+            throw invalidRequest(key + " is invalid");
+        }
+
+        return number;
+    }
+
+    private double requiredDouble(
+            Object value,
+            String key
+    ) {
+        if (value == null) {
+            throw invalidRequest(key + " is required");
+        }
+
+        try {
+            return Double.parseDouble(value.toString());
+        } catch (NumberFormatException exception) {
+            throw invalidRequest(key + " is invalid");
+        }
+    }
+
+    private Long optionalLong(Object value) {
+        if (value == null) {
+            return null;
+        }
+
+        if (value instanceof String string && string.isBlank()) {
+            return null;
+        }
+
+        return asLong(value);
+    }
+
+    private Long requiredLongValue(
+            Object value,
+            String key
+    ) {
+        Long number = optionalLong(value);
+
+        if (number == null) {
+            throw invalidRequest(key + " is required");
+        }
+
+        return number;
+    }
+
+    private boolean optionalBoolean(
+            Object value,
+            boolean defaultValue
+    ) {
+        if (value == null) {
+            return defaultValue;
+        }
+
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+
+        String string = value.toString().toLowerCase(Locale.ROOT);
+
+        if ("true".equals(string)) {
+            return true;
+        }
+
+        if ("false".equals(string)) {
+            return false;
+        }
+
+        throw invalidRequest("boolean value is invalid");
     }
 
     private void updateParentLeafState(Long parentId) {
@@ -643,7 +1136,7 @@ public class FacilitiesService {
         return new KeycloakAdminException(
                 HttpStatus.BAD_REQUEST,
                 "invalid_request",
-                message
+                "リクエストパラメータが不正です"
         );
     }
 

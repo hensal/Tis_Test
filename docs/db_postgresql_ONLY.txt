@@ -1,376 +1,238 @@
-PostgreSQL setup for the Facilities API
-=======================================
+PostgreSQL setup for Facilities API tests
+=========================================
 
 Purpose
 -------
-Use this file to create a fresh PostgreSQL database and dummy data so the current Spring Boot facilities API can be tested in Postman.
+Use this setup on any computer to create the PostgreSQL tables and sample data
+needed for the facilities Excel test cases.
 
-Current Spring Boot database setting:
+Source documents used
+---------------------
+1. /Users/hensal/Desktop/JAVA_SPRING_BOOT/TEST_CASE/DB設計.md
+2. /Users/hensal/Desktop/JAVA_SPRING_BOOT/TEST_CASE/サンプルデータ.md
+3. /Users/hensal/Desktop/JAVA_SPRING_BOOT/TEST_CASE/sample_data.sql
 
-spring.datasource.url=jdbc:postgresql://localhost:5432/vr_view_db
-spring.datasource.username=postgres
-spring.datasource.password=YOUR_POSTGRES_PASSWORD
+Project files created for portable setup
+----------------------------------------
+1. docs/schema_DB設計_facilities.sql
+   - Drops old app tables.
+   - Creates tables based on DB設計.md.
 
-Important security note
------------------------
-The facilities API permission is checked by Keycloak token role.
-The current code requires this Keycloak client role:
+2. docs/sample_data_DB設計.sql
+   - Copied from the provided sample_data.sql.
+   - Inserts the sample data described in サンプルデータ.md.
 
-SYS_ADMIN
+Important note
+--------------
+DB設計.md and sample_data.sql are not perfectly identical for role columns:
 
-So, in Postman, use an access token from a user who has SYS_ADMIN assigned in Keycloak.
+- DB設計.md describes keycloak_role_id.
+- sample_data.sql inserts keycloak_role_name.
 
-The PostgreSQL role tables below are only for dummy API response data. They are not used to authenticate the user. Authentication/authorization comes from Keycloak.
+To make the setup runnable, docs/schema_DB設計_facilities.sql keeps both columns:
 
+- keycloak_role_id
+- keycloak_role_name
 
-PART 1: Create database
------------------------
-Run this while connected to the default postgres database in pgAdmin Query Tool:
+This is also practical because Keycloak tokens usually contain role names such as
+SYS_ADMIN, R_USER01, viewer, etc.
+
+Step 1: Create the database
+---------------------------
+In pgAdmin, connect to the default postgres database and run:
 
 CREATE DATABASE vr_view_db;
 
-After that, right click vr_view_db and open Query Tool for vr_view_db.
-Run PART 2 and PART 3 inside vr_view_db.
+Then right-click vr_view_db and open Query Tool for vr_view_db.
 
-
-PART 2: Create tables
----------------------
-Run this inside vr_view_db.
-
-CREATE TABLE IF NOT EXISTS facilities_tree (
-    facility_id BIGSERIAL PRIMARY KEY,
-    parent_id BIGINT REFERENCES facilities_tree(facility_id),
-    node_name VARCHAR(128) NOT NULL,
-    sort_order INTEGER NOT NULL DEFAULT 10,
-    tree_level INTEGER,
-    is_leaf BOOLEAN NOT NULL DEFAULT TRUE,
-    public_flag CHAR(2) NOT NULL DEFAULT '01',
-    outer_flag BOOLEAN NOT NULL DEFAULT FALSE,
-    node_description VARCHAR(1000),
-    authority_setting_flg BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS files (
-    file_id BIGSERIAL PRIMARY KEY,
-    file_name VARCHAR(128) NOT NULL,
-    file_path VARCHAR(256),
-    file_type VARCHAR(32) NOT NULL,
-    file_size BIGINT NOT NULL,
-    s3_bucket VARCHAR(512) NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS facility_images (
-    image_id BIGSERIAL PRIMARY KEY,
-    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
-    file_id BIGINT NOT NULL REFERENCES files(file_id),
-    image_name VARCHAR(256) NOT NULL,
-    shooting_height_m DECIMAL(6,3) NOT NULL,
-    ceiling_height_m DECIMAL(6,3) NOT NULL,
-    guid VARCHAR(64) NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS maps (
-    map_id BIGSERIAL PRIMARY KEY,
-    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
-    file_id BIGINT NOT NULL REFERENCES files(file_id),
-    map_name VARCHAR(256) NOT NULL,
-    image_width INTEGER NOT NULL,
-    image_height INTEGER NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS map_points (
-    map_point_id BIGSERIAL PRIMARY KEY,
-    map_id BIGINT NOT NULL REFERENCES maps(map_id),
-    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
-    x DOUBLE PRECISION NOT NULL,
-    y DOUBLE PRECISION NOT NULL,
-    target_type VARCHAR(128) NOT NULL,
-    target_id BIGINT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS permission_master (
-    permission_id BIGSERIAL PRIMARY KEY,
-    permission_name VARCHAR(128) NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS facility_role_permission (
-    facility_role_permission_id BIGSERIAL PRIMARY KEY,
-    permission_id BIGINT NOT NULL REFERENCES permission_master(permission_id),
-    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
-    keycloak_role_id VARCHAR(64) NOT NULL,
-    keycloak_role_name VARCHAR(128) NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS equipment_types (
-    equipment_type_id BIGSERIAL PRIMARY KEY,
-    equipment_type_name VARCHAR(128) NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS equipment_masters (
-    equipment_master_id BIGSERIAL PRIMARY KEY,
-    equipment_type_id BIGINT NOT NULL REFERENCES equipment_types(equipment_type_id),
-    equipment_name VARCHAR(256) NOT NULL,
-    equipment_info_json TEXT NOT NULL,
-    equipment_info_html TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS equipments (
-    content_id BIGSERIAL PRIMARY KEY,
-    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
-    equipment_master_id BIGINT NOT NULL REFERENCES equipment_masters(equipment_master_id),
-    yaw DOUBLE PRECISION,
-    pitch DOUBLE PRECISION,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS annotations (
-    annotation_id BIGSERIAL PRIMARY KEY,
-    facility_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
-    yaw DOUBLE PRECISION,
-    pitch DOUBLE PRECISION,
-    annotation_type CHAR(2) NOT NULL DEFAULT '01',
-    annotation_title VARCHAR(256) NOT NULL,
-    annotation_content TEXT,
-    display_expire_type VARCHAR(16),
-    display_expire_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by VARCHAR(128) NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS hotspots (
-    hotspot_id BIGSERIAL PRIMARY KEY,
-    image_id BIGINT NOT NULL REFERENCES facility_images(image_id),
-    yaw DOUBLE PRECISION NOT NULL,
-    pitch DOUBLE PRECISION NOT NULL,
-    target_id BIGINT NOT NULL REFERENCES facilities_tree(facility_id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
-);
-
-
-PART 3: Insert dummy data
+Step 2: Create all tables
 -------------------------
-Run this inside vr_view_db after the tables are created.
-This creates facility_id 1 and 2 automatically.
+Open and run this file in pgAdmin Query Tool:
 
-INSERT INTO facilities_tree (
-    parent_id,
-    node_name,
-    sort_order,
-    tree_level,
-    is_leaf,
-    public_flag,
-    outer_flag,
-    node_description,
-    authority_setting_flg
-)
-VALUES
-(NULL, '管理棟', 10, 1, FALSE, '03', FALSE, '管理棟ルート施設', TRUE),
-(1, '第1会議室', 10, 2, TRUE, '02', FALSE, '会議室ノード', TRUE);
+docs/schema_DB設計_facilities.sql
 
-INSERT INTO files (
-    file_name,
-    file_path,
-    file_type,
-    file_size,
-    s3_bucket
-)
-VALUES
-('meeting-room-vr.jpg', '/1', 'vr_image', 1024000, 'http://localhost:9000/vr-view-bucket'),
-('floor-map-3f.png', '/2', 'map_image', 512000, 'http://localhost:9000/vr-view-bucket');
+If using psql:
 
-INSERT INTO facility_images (
-    facility_id,
-    file_id,
-    image_name,
-    shooting_height_m,
-    ceiling_height_m,
-    guid
-)
-VALUES
-(1, 1, '会議室VR', 1.600, 2.700, 'dummy-guid-001');
+psql -U postgres -d vr_view_db -f docs/schema_DB設計_facilities.sql
 
-INSERT INTO maps (
-    facility_id,
-    file_id,
-    map_name,
-    image_width,
-    image_height
-)
-VALUES
-(1, 2, '3F平面図', 1920, 1080);
+This recreates these tables:
 
-INSERT INTO map_points (
-    map_id,
-    facility_id,
-    x,
-    y,
-    target_type,
-    target_id
-)
-VALUES
-(1, 1, 120.5, 230.0, 'facility', 1);
+- facilities_tree
+- files
+- permission_master
+- facility_role_permission
+- equipment_types
+- equipment_masters
+- equipments
+- facility_images
+- maps
+- map_points
+- hotspots
+- annotation_type_master
+- annotations
+- annotation_comments
+- annotation_files
+- equipment_files
 
-INSERT INTO permission_master (
-    permission_name
-)
-VALUES
-('facility_view'),
-('vr_image_view'),
-('equipment_view'),
-('annotation_view');
+Step 3: Insert sample data
+--------------------------
+Open and run this file in pgAdmin Query Tool:
 
-INSERT INTO facility_role_permission (
-    permission_id,
-    facility_id,
-    keycloak_role_id,
-    keycloak_role_name
-)
-VALUES
-(1, 1, 'SYS_ADMIN', 'SYS_ADMIN'),
-(2, 1, 'SYS_ADMIN', 'SYS_ADMIN'),
-(3, 1, 'SYS_ADMIN', 'SYS_ADMIN'),
-(4, 1, 'SYS_ADMIN', 'SYS_ADMIN');
+docs/sample_data_DB設計.sql
 
-INSERT INTO equipment_types (
-    equipment_type_name
-)
-VALUES
-('空調設備');
+If using psql:
 
-INSERT INTO equipment_masters (
-    equipment_type_id,
-    equipment_name,
-    equipment_info_json,
-    equipment_info_html
-)
-VALUES
-(1, '室外機A', '{"maker":"dummy","model":"AC-001"}', '<p>室外機A</p>');
+psql -U postgres -d vr_view_db -f docs/sample_data_DB設計.sql
 
-INSERT INTO equipments (
-    facility_id,
-    equipment_master_id,
-    yaw,
-    pitch
-)
-VALUES
-(1, 1, 0.3456, 0.7890);
+The sample data inserts:
 
-INSERT INTO annotations (
-    facility_id,
-    yaw,
-    pitch,
-    annotation_type,
-    annotation_title,
-    annotation_content,
-    display_expire_type,
-    display_expire_at,
-    created_by
-)
-VALUES
-(1, 0.1000, 0.2000, '01', '点検依頼', '通常の点検依頼です', 'unlimited', NULL, 'admin01'),
-(1, 0.3000, 0.4000, '02', '緊急連絡', '緊急対応が必要です', 'unlimited', NULL, 'admin01');
+- 59 facilities_tree records
+- 11 files records
+- 5 permission_master records
+- 17 facility_role_permission records
+- 2 equipment_types records
+- 2 equipment_masters records
+- 6 equipments records
+- 17 facility_images records
+- 4 maps records
+- 14 map_points records
+- 2 annotation_type_master records
+- 2 hotspots records
+- 19 annotations records
+- 7 annotation_comments records
+- 1 annotation_files record
+- 1 equipment_files record
 
+Step 4: Check that data was inserted
+------------------------------------
+Run these SQL checks:
 
-PART 4: Check data
-------------------
-Run these SQL queries to confirm the setup.
+SELECT COUNT(*) FROM facilities_tree;
+SELECT COUNT(*) FROM files;
+SELECT COUNT(*) FROM permission_master;
+SELECT COUNT(*) FROM facility_role_permission;
+SELECT COUNT(*) FROM equipment_types;
+SELECT COUNT(*) FROM equipment_masters;
+SELECT COUNT(*) FROM equipments;
+SELECT COUNT(*) FROM facility_images;
+SELECT COUNT(*) FROM maps;
+SELECT COUNT(*) FROM map_points;
+SELECT COUNT(*) FROM annotations;
 
-SELECT * FROM facilities_tree ORDER BY facility_id;
-SELECT * FROM facility_images ORDER BY image_id;
-SELECT * FROM maps ORDER BY map_id;
-SELECT * FROM map_points ORDER BY map_id, map_point_id;
-SELECT * FROM facility_role_permission ORDER BY facility_role_permission_id;
-SELECT * FROM equipments ORDER BY content_id;
-SELECT * FROM annotations ORDER BY annotation_type, created_at;
+Useful sample IDs for Postman
+-----------------------------
+GET facilities detail:
 
+GET http://localhost:8081/facilities/111341
 
-PART 5: Spring Boot configuration
+GET by keyword:
+
+GET http://localhost:8081/facilities?keyword=東京
+
+GET by parent:
+
+GET http://localhost:8081/facilities?parentId=1110
+
+POST create child facility under an existing parent:
+
+POST http://localhost:8081/facilities
+Content-Type: application/json
+Authorization: Bearer <SYS_ADMIN access token>
+
+Example body:
+
+{
+  "facility_name": "新規テスト施設",
+  "parent_id": 1110,
+  "target_facility_id": null,
+  "public_flag": "02",
+  "outer_flag": false,
+  "authority_setting_flag": true
+}
+
+POST create with VR image, map, roles, and equipment:
+
+{
+  "facility_name": "最大正常施設",
+  "target_facility_id": null,
+  "parent_id": 1110,
+  "facility_description": "施設詳細テスト\n改行を含む500文字以内の説明文",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": {
+    "file_id": 5000,
+    "image_name": "entrance.jpg",
+    "shooting_height": 1600,
+    "ceiling_height": 3000
+  },
+  "map": {
+    "file_id": 5009,
+    "map_name": "floorplan.png",
+    "image_width": 736,
+    "image_height": 736
+  },
+  "roles": [
+    {
+      "keycloak_role_id": "R_USER01",
+      "permission_code": "VR画像参照"
+    },
+    {
+      "keycloak_role_id": "R_USER01",
+      "permission_code": "付箋参照"
+    }
+  ],
+  "equipments": [
+    {
+      "equipment_id": 10,
+      "yaw": 45,
+      "pitch": 10
+    }
+  ]
+}
+
+Compatibility note with Java code
 ---------------------------------
-In application.properties, use:
+This setup follows DB設計.md.
 
-spring.datasource.url=jdbc:postgresql://localhost:5432/vr_view_db
-spring.datasource.username=postgres
-spring.datasource.password=YOUR_POSTGRES_PASSWORD
+The Java facilities service should use these DB設計.md column names:
 
-If you use a different PostgreSQL username, replace postgres with that username.
+- facility_images.shooting_height_m / ceiling_height_m
+  Old names. Do not use.
 
+- facility_images.shooting_height / ceiling_height
+  Correct DB設計.md names.
 
-PART 6: Postman tests
+- facility_images.guid
+  Old column. Do not use.
+
+- map_points.target_type
+  Old column. Do not use.
+
+- equipments.content_id
+  Old column. Do not use.
+
+- equipments.equipment_id
+  Correct DB設計.md name.
+
+Quick troubleshooting
 ---------------------
-First get a Keycloak access token for a user who has SYS_ADMIN.
-Then send these requests with this header:
+If sample_data_DB設計.sql fails with a foreign key error:
 
-Authorization: Bearer YOUR_ACCESS_TOKEN
+1. Confirm schema_DB設計_facilities.sql completed successfully.
+2. Confirm you are connected to vr_view_db, not postgres.
+3. Re-run schema_DB設計_facilities.sql first because it drops and recreates the tables.
+4. Then re-run sample_data_DB設計.sql.
 
-1. Facilities list:
-GET http://localhost:8081/facilities
+If Postman returns permission_denied:
 
-2. Facilities keyword search:
-GET http://localhost:8081/facilities?keyword=管理
+1. Get a fresh Keycloak access token.
+2. For SYS_ADMIN tests, the token must include SYS_ADMIN.
+3. For non-SYS_ADMIN tests, the role in the token must match a role in
+   facility_role_permission, such as R_USER01 or R_PJMGR01.
 
-3. Facilities parent search:
-GET http://localhost:8081/facilities?parentId=1
+If Postman returns SQL column errors:
 
-4. Facilities detail:
-GET http://localhost:8081/facilities/1
-
-Expected detail result should include:
-- facility_id = 1
-- facility_name = 管理棟
-- images list
-- maps list
-- map_points list
-- roles list
-- equipments list
-- annotations list
-- has_vr_image = true
-- has_equipment = true
-- has_emergency_annotation = true
-- has_normal_annotation = true
-
-
-Common errors
--------------
-1. invalid_token
-Meaning: Missing token, expired token, wrong token, or token is not an access token.
-
-2. permission_denied
-Meaning: Token is valid, but the user does not have SYS_ADMIN in Keycloak.
-
-3. relation does not exist
-Meaning: Table was not created in the selected database. Make sure you are connected to vr_view_db in pgAdmin.
-
-4. duplicate key value violates unique constraint
-Meaning: You inserted the dummy data more than once. Use a fresh database, or delete existing rows first.
+The DB setup and Java code are using different column names. Use the
+"Compatibility warning with current Java code" section above to decide whether
+to change Java code or change the DB schema.

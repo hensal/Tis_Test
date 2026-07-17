@@ -115,13 +115,13 @@ If tables already exist, this SQL will not recreate them.
 CREATE TABLE IF NOT EXISTS facilities_tree (
     facility_id BIGSERIAL PRIMARY KEY,
     parent_id BIGINT REFERENCES facilities_tree(facility_id),
-    node_name VARCHAR(128) NOT NULL,
+    facility_name VARCHAR(128) NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 10,
     tree_level INTEGER,
     is_leaf BOOLEAN NOT NULL DEFAULT TRUE,
     public_flag CHAR(2) NOT NULL DEFAULT '01',
     outer_flag BOOLEAN NOT NULL DEFAULT FALSE,
-    node_description VARCHAR(1000),
+    facility_description VARCHAR(1000),
     authority_setting_flg BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -240,13 +240,13 @@ RESTART IDENTITY CASCADE;
 INSERT INTO facilities_tree (
     facility_id,
     parent_id,
-    node_name,
+    facility_name,
     sort_order,
     tree_level,
     is_leaf,
     public_flag,
     outer_flag,
-    node_description,
+    facility_description,
     authority_setting_flg
 )
 VALUES
