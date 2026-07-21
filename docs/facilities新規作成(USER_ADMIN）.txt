@@ -329,6 +329,378 @@ Example:
   }
 }
 
+
+1-15 リクエストパラメータ（親の施設にmapデータがある場合）
+--------------------------------------------------------
+
+Purpose:
+Create a facility under a parent that already has map data, and register one map point for the new facility.
+
+Before sending in Postman:
+1. The parent facility must exist.
+2. The parent facility must have one active map record.
+3. USER_ADMIN must have parent edit permission for the parent facility.
+
+Check parent map:
+SELECT map_id, facility_id, map_name
+FROM maps
+WHERE facility_id = <parent_id>
+  AND deleted_at IS NULL
+ORDER BY map_id ASC;
+
+Expected:
+At least 1 row.
+
+Check USER_ADMIN parent edit permission:
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = <parent_id>
+  AND keycloak_role_id IN (<login_user_role_ids>)
+  AND deleted_at IS NULL;
+
+Expected:
+permission_count >= 1
+
+Example for this 1-15 test:
+If the request parent_id is 1110 and the login user role is USER_ADMIN, run:
+
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 1110
+  AND keycloak_role_id IN ('USER_ADMIN')
+  AND deleted_at IS NULL;
+
+If permission_count is 0, insert:
+
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name
+)
+VALUES (
+  10,
+  1110,
+  'USER_ADMIN',
+  'USER_ADMIN'
+);
+
+Then run the count SQL again.
+Expected:
+permission_count >= 1
+
+
+1-15-1 facility_name
+--------------------
+
+Set any valid facility name.
+
+Example:
+"USER_ADMIN map_points正常施設"
+
+
+1-15-2 target_facility_id
+-------------------------
+
+Set the facility_id returned by SYS_ADMIN test 1-7-1.
+
+Example:
+1111
+
+
+1-15-3 parent_id
+----------------
+
+Set the facility_id registered in SYS_ADMIN test 1-4-1.
+
+Example:
+1110
+
+
+1-15-4 map_points
+-----------------
+
+Register one child map point object.
+
+
+1-15-5 map_points.x
+-------------------
+
+Set any number from -100 to 100.
+
+Example:
+50
+
+
+1-15-6 map_points.y
+-------------------
+
+Set any number from -100 to 100.
+
+Example:
+-30
+
+
+Postman Request Example For 1-15
+--------------------------------
+
+POST http://localhost:8081/facilities
+
+Headers:
+Authorization: Bearer <USER_ADMIN access_token>
+Content-Type: application/json
+
+Body:
+{
+  "facility_name": "USER_ADMIN map_points正常施設",
+  "target_facility_id": 1111,
+  "parent_id": 1110,
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "map_points": [
+    {
+      "x": 50,
+      "y": -30
+    }
+  ]
+}
+
+
+1-16 レスポンス
+---------------
+
+
+1-16-1 レスポンス内容
+--------------------
+
+Expected:
+200 OK
+
+Expected response:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": <created_facility_id>
+  }
+}
+
+Example:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1002
+  }
+}
+
+
+1-17 DBの値
+-----------
+
+
+1-17-1 facility_id
+------------------
+
+Check:
+SELECT facility_id
+FROM facilities_tree
+WHERE facility_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+1 row.
+
+
+1-17-2 parent_id
+----------------
+
+Check:
+SELECT parent_id
+FROM facilities_tree
+WHERE facility_id = <created_facility_id>;
+
+Expected:
+parent_id is the request parent_id.
+
+
+1-17-3 facility_name
+--------------------
+
+Check:
+SELECT facility_name
+FROM facilities_tree
+WHERE facility_id = <created_facility_id>;
+
+Expected:
+facility_name is the request facility_name.
+
+
+1-17-4 map_points
+-----------------
+
+Check:
+SELECT *
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+1 row.
+
+
+1-17-5 map_point_id
+-------------------
+
+Check:
+SELECT map_point_id
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+A valid generated ID.
+
+
+1-17-6 map_id
+-------------
+
+Expected value:
+The map_id from the parent facility map.
+
+Check parent map_id:
+SELECT map_id
+FROM maps
+WHERE facility_id = <request_parent_id>
+  AND deleted_at IS NULL
+ORDER BY map_id ASC
+LIMIT 1;
+
+Check inserted map point:
+SELECT map_id
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+Both map_id values are the same.
+
+
+1-17-7 facility_id
+------------------
+
+Check:
+SELECT facility_id
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+facility_id is the request parent_id.
+
+
+1-17-8 target_id
+----------------
+
+Check:
+SELECT target_id
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+target_id is the response facility_id.
+
+
+1-17-9 x
+--------
+
+Check:
+SELECT x
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+x is the request x value.
+
+
+1-17-10 y
+---------
+
+Check:
+SELECT y
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+y is the request y value.
+
+
+1-17-11 created_at
+------------------
+
+Check:
+SELECT created_at
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+created_at is the POST request time.
+
+
+1-17-12 updated_at
+------------------
+
+Check:
+SELECT updated_at
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+updated_at is the POST request time.
+
+
+1-17-13 deleted_at
+------------------
+
+Check:
+SELECT deleted_at
+FROM map_points
+WHERE target_id = <created_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+deleted_at is NULL.
+
+
+1-17-14 Other records
+---------------------
+
+Meaning:
+No unrelated records should be inserted, updated, or deleted by this create request.
+
+Simple check:
+Before and after the request, compare counts for unrelated tables:
+
+SELECT COUNT(*) FROM facility_images;
+SELECT COUNT(*) FROM maps;
+SELECT COUNT(*) FROM facility_role_permission;
+SELECT COUNT(*) FROM equipments;
+SELECT COUNT(*) FROM annotations;
+
+Expected:
+Only facilities_tree and map_points should change for this test.
+Other table counts should not change.
+
 DB confirmation:
 SELECT facility_id, parent_id, facility_name, deleted_at
 FROM facilities_tree
@@ -446,6 +818,44 @@ Check:
 data.roles
 
 The role in data.roles must match facility_role_permission.keycloak_role_id.
+
+Do not use the Keycloak user ID from the Details tab.
+Example of wrong value:
+b53c7925-b7de-4a44-a05b-74bd8898c3dd
+
+That is the user ID, not the role.
+If you check with the user ID, the count will be 0:
+
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 1110
+  AND keycloak_role_id IN ('b53c7925-b7de-4a44-a05b-74bd8898c3dd')
+  AND deleted_at IS NULL;
+
+Use the role from /api/keycloak/me instead:
+
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 1110
+  AND keycloak_role_id IN ('USER_ADMIN')
+  AND deleted_at IS NULL;
+
+If the correct role count is 0, insert it:
+
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name
+)
+VALUES (
+  10,
+  1110,
+  'USER_ADMIN',
+  'USER_ADMIN'
+);
 
 Important:
 The roles array inside the POST /facilities request body is for permissions on the new facility.
