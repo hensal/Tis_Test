@@ -98,6 +98,15 @@ public class SecurityConfig {
                         ).authenticated()
 
                         .requestMatchers(
+                                HttpMethod.POST,
+                                "/facilities"
+                        ).hasAnyAuthority(
+                                "ROLE_SYS_ADMIN",
+                                "ROLE_USER_ADMIN",
+                                "ROLE_User_admin"
+                        )
+
+                        .requestMatchers(
                                 "/facilities/**"
                         ).hasAuthority("ROLE_SYS_ADMIN")
 

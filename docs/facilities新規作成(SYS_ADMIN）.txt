@@ -3042,29 +3042,30 @@ Example request body:
 
 {
   "facility_name": "target指定施設",
-  "target_facility_id": <facility_id_created_in_1_6>,
-  "parent_id": <facility_id_created_in_1_4_1>,
+  "target_facility_id": <existing_child_facility_id_under_same_parent>,
+  "parent_id": <existing_parent_facility_id>,
   "public_flag": "02",
   "outer_flag": true,
   "authority_setting_flag": true
 }
 
 For this API condition, target_facility_id must be an existing child of the same parent_id.
-So this must be true in DB:
+With sample_data_DB設計.sql, parent_id 1110 has child facilities.
+Find valid target_facility_id values with this SQL:
 
 SELECT facility_id, parent_id, facility_name, sort_order
 FROM facilities_tree
-WHERE parent_id = 1
+WHERE parent_id = 1110
   AND deleted_at IS NULL
 ORDER BY sort_order;
 
 Then choose one returned facility_id as target_facility_id.
-Example, if this query returns facility_id = 6, use:
+Example, if this query returns facility_id = 1111, use:
 
 {
   "facility_name": "target指定施設",
-  "target_facility_id": 6,
-  "parent_id": 1,
+  "target_facility_id": 1111,
+  "parent_id": 1110,
   "public_flag": "02",
   "outer_flag": true,
   "authority_setting_flag": true
@@ -3085,7 +3086,14 @@ Use "target指定施設" as facility_name.
 -----------------------------------------------------------
 
 Description:
-Use the facility_id created in the 1-6 normal maximum request as target_facility_id.
+Use an existing child facility_id under the same parent_id as target_facility_id.
+With sample_data_DB設計.sql, choose a child returned by:
+
+SELECT facility_id, parent_id, facility_name, sort_order
+FROM facilities_tree
+WHERE parent_id = 1110
+  AND deleted_at IS NULL
+ORDER BY sort_order;
 
 Test:
 Confirm target_facility_id exists under the same parent_id.
@@ -3095,7 +3103,8 @@ Confirm target_facility_id exists under the same parent_id.
 ---------------------------------------------------
 
 Description:
-Use the parent facility created in 1-4-1 as parent_id.
+Use the same parent_id as the target facility.
+With sample_data_DB設計.sql, use parent_id 1110.
 
 Test:
 Confirm parent_id exists and is the same parent as target_facility_id.
