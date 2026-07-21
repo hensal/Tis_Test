@@ -1,0 +1,733 @@
+Facilities Create API Test Steps: facilities新規作成(USER_ADMIN)
+=================================================================
+
+API:
+POST http://localhost:8081/facilities
+
+Common Postman setup:
+1. Method: POST
+2. URL: http://localhost:8081/facilities
+3. Headers:
+   Authorization: Bearer <USER_ADMIN access_token>
+   Content-Type: application/json
+4. Body:
+   raw -> JSON
+
+Expected common success response:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": <created_facility_id>
+  }
+}
+
+Expected common error response for invalid request parameters:
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+Expected common error response when USER_ADMIN does not have parent edit permission:
+{
+  "success": false,
+  "error_code": "permission_denied",
+  "message": "施設を登録する権限がありません",
+  "errors": null,
+  "data": null
+}
+
+Important:
+- The login token must have USER_ADMIN or User_admin role.
+- USER_ADMIN can call POST /facilities, but cannot create under any parent automatically.
+- For USER_ADMIN, the user must also have edit permission for the parent facility.
+- In this API, parent edit permission means:
+  permission_id = 10
+  facility_id = request parent_id
+  keycloak_role_id = one of the login user's Keycloak roles
+- If the token is missing or wrong, you will get invalid_token first.
+- If the token does not have USER_ADMIN/User_admin/SYS_ADMIN, you will get permission_denied before DB logic.
+- New test cases should always be appended at the bottom in Excel serial order.
+- In SQL examples, <response_facility_id> means the actual data.facility_id returned by Postman.
+  Example: if Postman returns "facility_id": 18, use 18 in the SQL.
+
+
+Before Testing: Check Login User Roles
+-------------------------------------
+
+Call:
+GET http://localhost:8081/api/keycloak/me
+
+Headers:
+Authorization: Bearer <USER_ADMIN access_token>
+
+Confirm that the response data.roles contains the role you will use for DB permission.
+
+Example:
+{
+  "roles": [
+    "USER_ADMIN",
+    "R_USER01"
+  ]
+}
+
+In this example:
+- USER_ADMIN allows calling POST /facilities.
+- R_USER01 must be registered in facility_role_permission for the parent facility.
+
+
+Before Testing: Add Parent Facility Edit Permission
+--------------------------------------------------
+
+Meaning:
+When creating a child facility, USER_ADMIN must have edit permission on the parent facility.
+This is the Excel condition:
+
+SELECT COUNT(*)
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = <parent_facility_id>
+  AND keycloak_role_id IN (<login_user_roles>);
+
+If this count is 1 or more, USER_ADMIN can create under that parent.
+If this count is 0, the API should return permission_denied.
+
+Example SQL:
+If parent_id is 1110 and the login user has role R_USER01:
+
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name
+)
+VALUES (
+  10,
+  1110,
+  'R_USER01',
+  'R_USER01'
+);
+
+Check SQL:
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 1110
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+permission_count >= 1
+
+
+Base Normal Test Request
+------------------------
+
+Use this after the parent edit permission row exists.
+
+POST http://localhost:8081/facilities
+
+{
+  "parent_id": 1110,
+  "facility_name": "USER_ADMIN作成テスト",
+  "public_flag": "02",
+  "outer_flag": false,
+  "authority_setting_flag": false,
+  "facility_description": "USER_ADMIN create test"
+}
+
+Expected:
+200 OK
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": <created_facility_id>
+  }
+}
+
+DB confirmation:
+SELECT facility_id, parent_id, facility_name, public_flag, outer_flag, authority_setting_flg, deleted_at
+FROM facilities_tree
+WHERE facility_id = <response_facility_id>;
+
+Expected:
+- facility_id is the same as the Postman response.
+- parent_id is the request parent_id.
+- facility_name is the request facility_name.
+- deleted_at is NULL.
+
+
+Base Permission Error Test
+--------------------------
+
+Use this to confirm the USER_ADMIN parent edit permission rule is working.
+
+1. Delete or do not create the parent edit permission row for the login user's role.
+
+Example:
+DELETE FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 1110
+  AND keycloak_role_id = 'R_USER01';
+
+2. Send the same POST request:
+
+{
+  "parent_id": 1110,
+  "facility_name": "USER_ADMIN権限なしテスト",
+  "public_flag": "02",
+  "outer_flag": false,
+  "authority_setting_flag": false,
+  "facility_description": "permission error test"
+}
+
+Expected:
+403 Forbidden
+
+{
+  "success": false,
+  "error_code": "permission_denied",
+  "message": "施設を登録する権限がありません",
+  "errors": null,
+  "data": null
+}
+
+
+Test Cases
+----------
+
+Use the corrected USER_ADMIN Excel numbering below.
+
+
+1-2 リクエストパラメータ（最低限のパラメータ送信）
+------------------------------------------------
+
+Purpose:
+Check that USER_ADMIN can create a facility with minimum request parameters.
+
+Important Excel dependency:
+- 1-2-2 parent_id:
+  Use the facility_id returned by facilities新規作成(SYS_ADMIN） test 1-3-1.
+- 1-2-3 target_facility_id:
+  Use the facility_id returned by facilities新規作成(SYS_ADMIN） test 1-7-1.
+
+Before sending in Postman:
+The USER_ADMIN login user must have parent edit permission for the parent_id.
+
+Example:
+If:
+- parent_id from SYS_ADMIN 1-3-1 is 1110
+- USER_ADMIN user has role R_USER01
+
+Run:
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name
+)
+VALUES (
+  10,
+  1110,
+  'R_USER01',
+  'R_USER01'
+);
+
+Check:
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 1110
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+permission_count >= 1
+
+
+1-2-1 facility_name
+-------------------
+
+Set any valid facility name.
+
+Example:
+"USER_ADMIN最低限テスト"
+
+
+1-2-2 parent_id
+---------------
+
+Set the facility_id returned by facilities新規作成(SYS_ADMIN） test 1-3-1.
+
+Example:
+1110
+
+
+1-2-3 target_facility_id
+------------------------
+
+Set the facility_id returned by facilities新規作成(SYS_ADMIN） test 1-7-1.
+
+Example:
+1111
+
+This means:
+Create the new facility as a child of parent_id, and place it after target_facility_id in the same parent.
+
+
+Postman Request Example
+-----------------------
+
+POST http://localhost:8081/facilities
+
+Headers:
+Authorization: Bearer <USER_ADMIN access_token>
+Content-Type: application/json
+
+Body:
+{
+  "facility_name": "USER_ADMIN最低限テスト",
+  "parent_id": 1110,
+  "target_facility_id": 1111
+}
+
+
+1-3 レスポンス
+--------------
+
+
+1-3-1 レスポンス内容
+-------------------
+
+Expected:
+200 OK
+
+Expected response:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": <created_facility_id>
+  }
+}
+
+Example:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1002
+  }
+}
+
+DB confirmation:
+SELECT facility_id, parent_id, facility_name, deleted_at
+FROM facilities_tree
+WHERE facility_id = <created_facility_id>;
+
+Expected:
+- facility_id is the same as the response data.facility_id.
+- parent_id is the value sent in the request.
+- facility_name is the value sent in the request.
+- deleted_at is NULL.
+
+
+1-5 リクエストパラメータ（最大のパラメータ送信：正常時）
+------------------------------------------------------
+
+
+1-5-1 事前準備：親施設の編集ロールを付与する
+-------------------------------------------
+
+Meaning:
+Before USER_ADMIN creates a child facility, the login user must have edit permission for the parent facility.
+
+Why:
+USER_ADMIN can call POST /facilities, but creating under a parent facility requires permission_id = 10 on that parent.
+
+SQL condition from Excel:
+This count must be 1 or more.
+
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = <facility_id_created_in_SYS_ADMIN_1_4_1>
+  AND keycloak_role_id IN (<login_user_role_ids>)
+  AND deleted_at IS NULL;
+
+Example:
+If the parent facility created in SYS_ADMIN 1-4-1 is 1110,
+and the USER_ADMIN login user has role R_USER01:
+
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name
+)
+VALUES (
+  10,
+  1110,
+  'R_USER01',
+  'R_USER01'
+);
+
+Check:
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 1110
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+permission_count >= 1
+
+If permission_count is 0:
+POST /facilities should return:
+{
+  "success": false,
+  "error_code": "permission_denied",
+  "message": "施設を登録する権限がありません",
+  "errors": null,
+  "data": null
+}
+
+Common mistake:
+The keycloak_role_id in facility_role_permission must match one of the roles inside the login user's access token.
+
+Example:
+If Keycloak user pjmgr01 has only this client role:
+USER_ADMIN
+
+Then this DB row is correct:
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name
+)
+VALUES (
+  10,
+  1110,
+  'USER_ADMIN',
+  'USER_ADMIN'
+);
+
+This DB row will not work unless the login user's token also contains R_USER01:
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name
+)
+VALUES (
+  10,
+  1110,
+  'R_USER01',
+  'R_USER01'
+);
+
+How to confirm the real login user's roles:
+Call this API with the same token used for POST /facilities:
+
+GET http://localhost:8081/api/keycloak/me
+
+Check:
+data.roles
+
+The role in data.roles must match facility_role_permission.keycloak_role_id.
+
+Important:
+The roles array inside the POST /facilities request body is for permissions on the new facility.
+It does not give the current login user permission to create under the parent.
+
+
+1-5-2 facility_name
+-------------------
+
+Set any valid facility name.
+
+Example:
+"USER_ADMIN最大正常施設"
+
+
+1-5-3 target_facility_id
+------------------------
+
+Set NULL.
+
+Example JSON:
+"target_facility_id": null
+
+
+1-5-4 parent_id
+---------------
+
+Set the facility_id registered in SYS_ADMIN test 1-4-1.
+
+Example:
+1110
+
+
+1-5-5 facility_description
+--------------------------
+
+Set any valid description with a newline, up to 500 characters.
+
+Example:
+"施設詳細テスト\n改行を含む500文字以内の説明文"
+
+
+1-5-6 public_flag
+-----------------
+
+Set "02".
+
+
+1-5-7 outer_flag
+----------------
+
+Set true.
+
+
+1-5-8 authority_setting_flag
+----------------------------
+
+Set true.
+
+
+1-5-9 vr_image
+--------------
+
+Register one child VR image object.
+
+
+1-5-10 vr_image.file_id
+-----------------------
+
+Use the FILE_ID returned by POST /files for a VR image.
+For unit testing, prepare the file record in the files table before sending the request.
+
+Example:
+5000
+
+
+1-5-11 vr_image.image_name
+--------------------------
+
+Set the same name as FILES.FILE_NAME for the VR image file.
+
+Example:
+"entrance.jpg"
+
+
+1-5-12 vr_image.shooting_height
+-------------------------------
+
+Set 1600.
+
+
+1-5-13 vr_image.ceiling_height
+------------------------------
+
+Set 3000.
+
+
+1-5-14 map
+----------
+
+Register one child map object.
+
+
+1-5-15 map.file_id
+------------------
+
+Use the FILE_ID returned by POST /files for a map image.
+For unit testing, prepare the file record in the files table before sending the request.
+
+Example:
+5009
+
+
+1-5-16 map.map_name
+-------------------
+
+Set the same name as FILES.FILE_NAME for the map image file.
+
+Example:
+"floorplan.png"
+
+
+1-5-17 map.image_width
+----------------------
+
+Set the width in pixels of the map image sent by Files API.
+
+Example:
+736
+
+
+1-5-18 map.image_height
+-----------------------
+
+Set the height in pixels of the map image sent by Files API.
+
+Example:
+736
+
+
+1-5-19 roles
+------------
+
+Register multiple child role permission objects.
+
+
+1-5-20 roles.keycloak_role_id
+-----------------------------
+
+Set roles that exist in Keycloak and are not SYS_ADMIN.
+Each role should be different.
+
+Example:
+"R_USER01"
+"R_PJMGR01"
+
+
+1-5-21 roles.permission_code
+----------------------------
+
+Set a value that exists in PERMISSION_MASTER.PERMISSION_NAME.
+
+Example:
+"VR画像参照"
+"付箋参照"
+
+
+1-5-22 equipments
+-----------------
+
+Register multiple child equipment objects.
+
+
+1-5-23 equipments.equipment_id
+------------------------------
+
+Set an ID that exists in EQUIPMENT_MASTERS.EQUIPMENT_MASTER_ID.
+The same equipment_master_id can be used more than once.
+
+Example:
+10
+
+
+1-5-24 equipments.yaw
+---------------------
+
+Set any number from -180 to 180.
+
+Example:
+45
+
+
+1-5-25 equipments.pitch
+-----------------------
+
+Set any number from -180 to 180.
+
+Example:
+10
+
+
+Postman Request Example For 1-5
+-------------------------------
+
+POST http://localhost:8081/facilities
+
+Headers:
+Authorization: Bearer <USER_ADMIN access_token>
+Content-Type: application/json
+
+Body:
+{
+  "facility_name": "USER_ADMIN最大正常施設",
+  "target_facility_id": null,
+  "parent_id": 1110,
+  "facility_description": "施設詳細テスト\n改行を含む500文字以内の説明文",
+  "public_flag": "02",
+  "outer_flag": true,
+  "authority_setting_flag": true,
+  "vr_image": {
+    "file_id": 5000,
+    "image_name": "entrance.jpg",
+    "shooting_height": 1600,
+    "ceiling_height": 3000
+  },
+  "map": {
+    "file_id": 5009,
+    "map_name": "floorplan.png",
+    "image_width": 736,
+    "image_height": 736
+  },
+  "roles": [
+    {
+      "keycloak_role_id": "R_USER01",
+      "permission_code": "VR画像参照"
+    },
+    {
+      "keycloak_role_id": "R_PJMGR01",
+      "permission_code": "付箋参照"
+    }
+  ],
+  "equipments": [
+    {
+      "equipment_id": 10,
+      "yaw": 45,
+      "pitch": 10
+    },
+    {
+      "equipment_id": 10,
+      "yaw": -45,
+      "pitch": -10
+    }
+  ]
+}
+
+
+1-6 レスポンス
+--------------
+
+
+1-6-1 レスポンス内容
+-------------------
+
+Expected:
+200 OK
+
+Expected response:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": <created_facility_id>
+  }
+}
+
+Example:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": 1002
+  }
+}

@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class FacilitiesService {
@@ -28,6 +30,7 @@ public class FacilitiesService {
     private static final ZoneId JAPAN_ZONE = ZoneId.of("Asia/Tokyo");
     private static final DateTimeFormatter DATE_TIME_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss");
+    private static final long FACILITY_EDIT_PERMISSION_ID = 10L;
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -99,11 +102,15 @@ public class FacilitiesService {
     }
 
     @Transactional
-    public Map<String, Object> createFacility(Map<String, Object> request) {
+    public Map<String, Object> createFacility(
+            Map<String, Object> request,
+            Set<String> userRoles
+    ) {
         validateCreateRequestKeys(request);
 
         Long parentId = optionalLong(request.get("parent_id"));
         FacilityRecord parent = parentId == null ? null : getActiveFacility(parentId);
+        ensureCreatePermission(parentId, userRoles);
         Long targetFacilityId = optionalLong(request.get("target_facility_id"));
         String facilityName = requiredFacilityName(request);
         String publicFlag = resolvePublicFlag(request);
@@ -589,6 +596,41 @@ public class FacilitiesService {
         }
 
         return results.getFirst();
+    }
+
+    private void ensureCreatePermission(
+            Long parentId,
+            Set<String> userRoles
+    ) {
+        if (userRoles != null && userRoles.contains("SYS_ADMIN")) {
+            return;
+        }
+
+        if (parentId == null || userRoles == null || userRoles.isEmpty()) {
+            throw permissionDenied();
+        }
+
+        String placeholders = userRoles.stream()
+                .map(role -> "?")
+                .collect(Collectors.joining(", "));
+
+        List<Object> params = new java.util.ArrayList<>();
+        params.add(FACILITY_EDIT_PERMISSION_ID);
+        params.add(parentId);
+        params.addAll(userRoles);
+
+        Integer permissionCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM facility_role_permission
+                 WHERE permission_id = ?
+                   AND facility_id = ?
+                   AND keycloak_role_id IN (%s)
+                   AND deleted_at IS NULL
+                """.formatted(placeholders), Integer.class, params.toArray());
+
+        if (permissionCount == null || permissionCount == 0) {
+            throw permissionDenied();
+        }
     }
 
     private int nextSortOrder(Long parentId) {
@@ -1137,6 +1179,14 @@ public class FacilitiesService {
                 HttpStatus.BAD_REQUEST,
                 "invalid_request",
                 "リクエストパラメータが不正です"
+        );
+    }
+
+    private KeycloakAdminException permissionDenied() {
+        return new KeycloakAdminException(
+                HttpStatus.FORBIDDEN,
+                "permission_denied",
+                "施設を登録する権限がありません"
         );
     }
 

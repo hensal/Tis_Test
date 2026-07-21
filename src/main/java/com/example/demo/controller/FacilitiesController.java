@@ -5,6 +5,8 @@ import com.example.demo.exception.KeycloakAdminException;
 import com.example.demo.service.FacilitiesService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/facilities")
@@ -74,10 +78,14 @@ public class FacilitiesController {
 
     @PostMapping
     public ResponseEntity<ApiResponse<Map<String, Object>>> createFacility(
-            @RequestBody Map<String, Object> request
+            @RequestBody Map<String, Object> request,
+            Authentication authentication
     ) {
         return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.createFacility(request))
+                ApiResponse.ok(facilitiesService.createFacility(
+                        request,
+                        extractRoleNames(authentication)
+                ))
         );
     }
 
@@ -169,5 +177,19 @@ public class FacilitiesController {
                 "invalid_request",
                 "リクエストパラメータが不正です"
         );
+    }
+
+    private Set<String> extractRoleNames(Authentication authentication) {
+        if (authentication == null) {
+            return Set.of();
+        }
+
+        return authentication.getAuthorities()
+                .stream()
+                .map(GrantedAuthority::getAuthority)
+                .map(authority -> authority.startsWith("ROLE_")
+                        ? authority.substring("ROLE_".length())
+                        : authority)
+                .collect(Collectors.toSet());
     }
 }
