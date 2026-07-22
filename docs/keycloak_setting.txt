@@ -1,0 +1,120 @@
+Keycloak Setting
+================
+
+Purpose
+-------
+
+Use this file to confirm which Keycloak server this Spring Boot API uses.
+
+
+Keycloak URLs
+-------------
+
+Keycloak admin console:
+
+  http://172.21.33.114:8080
+
+Keycloak API / token endpoint base:
+
+  http://172.21.33.114:9443
+
+Realm:
+
+  pygmalion_viewer
+
+Application client:
+
+  TestClient
+
+
+Spring Boot application.properties
+----------------------------------
+
+The code should use the Keycloak API endpoint, not the console URL.
+
+Required settings:
+
+  keycloak.base-url=http://172.21.33.114:9443
+  keycloak.realm=pygmalion_viewer
+  keycloak.app-client-id=TestClient
+  spring.security.oauth2.resourceserver.jwt.issuer-uri=http://172.21.33.114:9443/realms/pygmalion_viewer
+
+Important:
+
+  http://172.21.33.114:8080 is for opening the Keycloak admin console in a browser.
+  http://172.21.33.114:9443 is for token/API calls.
+
+
+Postman: get access token
+-------------------------
+
+Request:
+
+  POST http://172.21.33.114:9443/realms/pygmalion_viewer/protocol/openid-connect/token
+
+Body:
+
+  x-www-form-urlencoded
+
+Parameters:
+
+  grant_type      password
+  client_id       TestClient
+  client_secret   <TestClient client secret>
+  username        <Keycloak username>
+  password        <Keycloak password>
+
+Expected:
+
+  Response contains access_token.
+
+
+Postman: authorized GET /api/me
+-------------------------------
+
+Request:
+
+  GET http://localhost:8081/api/keycloak/me
+
+Headers:
+
+  Authorization: Bearer <access_token>
+
+Expected success response example:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "user_id": "...",
+    "login_id": "...",
+    "user_name": "...",
+    "roles": [
+      "viewer"
+    ],
+    "can_use_admin_mode": false,
+    "created_at": "..."
+  }
+}
+
+
+How to confirm the app is not using local Keycloak
+--------------------------------------------------
+
+Check application.properties:
+
+  keycloak.base-url must not be localhost.
+  spring.security.oauth2.resourceserver.jwt.issuer-uri must not be localhost.
+
+Then restart Spring Boot.
+
+After restart, get a new access token from:
+
+  http://172.21.33.114:9443/realms/pygmalion_viewer/protocol/openid-connect/token
+
+Then call:
+
+  GET http://localhost:8081/api/keycloak/me
+
+If the token was issued by another Keycloak server, Spring Boot will reject it.
