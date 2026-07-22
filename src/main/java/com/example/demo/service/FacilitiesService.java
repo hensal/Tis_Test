@@ -167,38 +167,72 @@ public class FacilitiesService {
             Long facilityId,
             Map<String, Object> request
     ) {
-        getActiveFacility(facilityId);
+        FacilityRecord facility = getActiveFacility(facilityId);
+        ensureNotConflicted(facility, request);
 
         if (request.containsKey("facility_name")) {
             jdbcTemplate.update("""
                     UPDATE facilities_tree
                        SET facility_name = ?, updated_at = CURRENT_TIMESTAMP
                      WHERE facility_id = ? AND deleted_at IS NULL
-                    """, requiredString(request, "facility_name"), facilityId);
+                    """, requiredFacilityName(request), facilityId);
         }
 
-        if (request.containsKey("publish_mode")) {
+        if (request.containsKey("public_flag") || request.containsKey("publish_mode")) {
             jdbcTemplate.update("""
                     UPDATE facilities_tree
                        SET public_flag = ?, updated_at = CURRENT_TIMESTAMP
                      WHERE facility_id = ? AND deleted_at IS NULL
-                    """, toPublicFlag(stringValue(request.get("publish_mode"))), facilityId);
+                    """, resolvePublicFlag(request), facilityId);
         }
 
-        if (request.containsKey("is_outdoor")) {
+        if (request.containsKey("outer_flag") || request.containsKey("is_outdoor")) {
             jdbcTemplate.update("""
                     UPDATE facilities_tree
                        SET outer_flag = ?, updated_at = CURRENT_TIMESTAMP
                      WHERE facility_id = ? AND deleted_at IS NULL
-                    """, Boolean.TRUE.equals(asBoolean(request.get("is_outdoor"))), facilityId);
+                    """, optionalBoolean(request.getOrDefault("outer_flag", request.get("is_outdoor")), false), facilityId);
         }
 
-        if (request.containsKey("detail")) {
+        if (request.containsKey("facility_description") || request.containsKey("detail")) {
             jdbcTemplate.update("""
                     UPDATE facilities_tree
                        SET facility_description = ?, updated_at = CURRENT_TIMESTAMP
                      WHERE facility_id = ? AND deleted_at IS NULL
-                    """, stringValue(request.get("detail")), facilityId);
+                    """, optionalDescription(request), facilityId);
+        }
+
+        if (request.containsKey("authority_setting_flag")) {
+            jdbcTemplate.update("""
+                    UPDATE facilities_tree
+                       SET authority_setting_flg = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE facility_id = ? AND deleted_at IS NULL
+                    """, optionalBoolean(request.get("authority_setting_flag"), false), facilityId);
+        }
+
+        if (request.containsKey("vr_image")) {
+            softDeleteByFacility("facility_images", facilityId);
+            insertVrImage(facilityId, objectList(request.get("vr_image"), "vr_image", 1));
+        }
+
+        if (request.containsKey("map")) {
+            softDeleteByFacility("maps", facilityId);
+            insertMap(facilityId, objectValue(request.get("map"), "map", false));
+        }
+
+        if (request.containsKey("roles")) {
+            softDeleteByFacility("facility_role_permission", facilityId);
+            insertRoles(facilityId, objectList(request.get("roles"), "roles", Integer.MAX_VALUE));
+        }
+
+        if (request.containsKey("equipments")) {
+            softDeleteByFacility("equipments", facilityId);
+            insertEquipments(facilityId, objectList(request.get("equipments"), "equipments", Integer.MAX_VALUE));
+        }
+
+        if (request.containsKey("map_points")) {
+            softDeleteMapPointsForTarget(facilityId);
+            insertMapPoint(facilityId, facility.parentId, objectList(request.get("map_points"), "map_points", 1));
         }
 
         return toDetailResponse(getActiveFacility(facilityId));
@@ -225,15 +259,19 @@ public class FacilitiesService {
             Map<String, Object> request
     ) {
         FacilityRecord facility = getActiveFacility(facilityId);
-        Long targetFacilityId = requiredLong(request, "target_facility_id");
+        ensureNotConflicted(facility, request);
+        Long parentId = optionalLong(request.get("parent_id"));
+        FacilityRecord parent = parentId == null ? null : getActiveFacility(parentId);
+        Long targetFacilityId = optionalLong(request.get("target_facility_id"));
 
-        if (facilityId.equals(targetFacilityId)) {
-            throw invalidRequest("target_facility_id is invalid");
+        if (facilityId.equals(parentId) || facilityId.equals(targetFacilityId)) {
+            throw invalidRequest("facility move target is invalid");
         }
 
-        FacilityRecord target = getActiveFacility(targetFacilityId);
-        int sortOrder = nextSortOrder(targetFacilityId);
-        int treeLevel = target.treeLevel == null ? 1 : target.treeLevel + 1;
+        ensureNotDescendant(facilityId, parentId);
+        int oldTreeLevel = facility.treeLevel == null ? 1 : facility.treeLevel;
+        int treeLevel = parent == null || parent.treeLevel == null ? 1 : parent.treeLevel + 1;
+        int sortOrder = createSortOrder(parentId, targetFacilityId);
 
         jdbcTemplate.update("""
                 UPDATE facilities_tree
@@ -242,10 +280,12 @@ public class FacilitiesService {
                        tree_level = ?,
                        updated_at = CURRENT_TIMESTAMP
                  WHERE facility_id = ? AND deleted_at IS NULL
-                """, targetFacilityId, sortOrder, treeLevel, facilityId);
+                """, parentId, sortOrder, treeLevel, facilityId);
+
+        updateDescendantTreeLevels(facilityId, treeLevel - oldTreeLevel);
 
         updateParentLeafState(facility.parentId);
-        updateParentLeafState(targetFacilityId);
+        updateParentLeafState(parentId);
 
         return toDetailResponse(getActiveFacility(facilityId));
     }
@@ -256,10 +296,12 @@ public class FacilitiesService {
             Map<String, Object> request
     ) {
         FacilityRecord source = getActiveFacility(facilityId);
-        Long targetFacilityId = requiredLong(request, "target_facility_id");
-        FacilityRecord target = getActiveFacility(targetFacilityId);
-        int sortOrder = nextSortOrder(targetFacilityId);
-        int treeLevel = target.treeLevel == null ? 1 : target.treeLevel + 1;
+        ensureNotConflicted(source, request);
+        Long parentId = optionalLong(request.get("parent_id"));
+        FacilityRecord parent = parentId == null ? null : getActiveFacility(parentId);
+        Long targetFacilityId = optionalLong(request.get("target_facility_id"));
+        int sortOrder = createSortOrder(parentId, targetFacilityId);
+        int treeLevel = parent == null || parent.treeLevel == null ? 1 : parent.treeLevel + 1;
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
@@ -279,7 +321,11 @@ public class FacilitiesService {
                     )
                     VALUES (?, ?, ?, ?, TRUE, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """, new String[]{"facility_id"});
-            ps.setLong(1, targetFacilityId);
+            if (parentId == null) {
+                ps.setObject(1, null);
+            } else {
+                ps.setLong(1, parentId);
+            }
             ps.setString(2, source.facilityName);
             ps.setInt(3, sortOrder);
             ps.setInt(4, treeLevel);
@@ -290,9 +336,10 @@ public class FacilitiesService {
             return ps;
         }, keyHolder);
 
-        updateParentLeafState(targetFacilityId);
-
         Long copiedFacilityId = Objects.requireNonNull(keyHolder.getKey()).longValue();
+        copyRelatedRows(facilityId, copiedFacilityId);
+        updateParentLeafState(parentId);
+
         return toDetailResponse(getActiveFacility(copiedFacilityId));
     }
 
@@ -633,6 +680,22 @@ public class FacilitiesService {
         }
     }
 
+    private void ensureNotConflicted(
+            FacilityRecord facility,
+            Map<String, Object> request
+    ) {
+        if (!request.containsKey("updated_at")) {
+            return;
+        }
+
+        String requestedUpdatedAt = stringValue(request.get("updated_at"));
+        String currentUpdatedAt = format(facility.updatedAt);
+
+        if (!Objects.equals(requestedUpdatedAt, currentUpdatedAt)) {
+            throw conflict();
+        }
+    }
+
     private int nextSortOrder(Long parentId) {
         Integer maxSortOrder;
 
@@ -784,7 +847,7 @@ public class FacilitiesService {
                 throw invalidRequest("keycloak_role_id is invalid");
             }
 
-            Long permissionId = permissionId(requiredString(role, "permission_code"));
+            Long permissionId = permissionId(requiredLong(role, "permission_code"));
 
             jdbcTemplate.update("""
                     INSERT INTO facility_role_permission (
@@ -868,6 +931,221 @@ public class FacilitiesService {
                 """, mapId, parentId, x, y, facilityId);
     }
 
+    private void softDeleteByFacility(String tableName, Long facilityId) {
+        if (!List.of(
+                "facility_images",
+                "maps",
+                "facility_role_permission",
+                "equipments",
+                "annotations"
+        ).contains(tableName)) {
+            throw invalidRequest("table is invalid");
+        }
+
+        jdbcTemplate.update("""
+                UPDATE %s
+                   SET deleted_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE facility_id = ?
+                   AND deleted_at IS NULL
+                """.formatted(tableName), facilityId);
+    }
+
+    private void softDeleteMapPointsForTarget(Long facilityId) {
+        jdbcTemplate.update("""
+                UPDATE map_points
+                   SET deleted_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE target_id = ?
+                   AND deleted_at IS NULL
+                """, facilityId);
+    }
+
+    private void ensureNotDescendant(Long facilityId, Long newParentId) {
+        if (newParentId == null) {
+            return;
+        }
+
+        Integer descendantCount = jdbcTemplate.queryForObject("""
+                WITH RECURSIVE descendants AS (
+                    SELECT facility_id
+                      FROM facilities_tree
+                     WHERE parent_id = ?
+                       AND deleted_at IS NULL
+                    UNION ALL
+                    SELECT child.facility_id
+                      FROM facilities_tree child
+                      JOIN descendants parent
+                        ON child.parent_id = parent.facility_id
+                     WHERE child.deleted_at IS NULL
+                )
+                SELECT COUNT(*)
+                  FROM descendants
+                 WHERE facility_id = ?
+                """, Integer.class, facilityId, newParentId);
+
+        if (descendantCount != null && descendantCount > 0) {
+            throw invalidRequest("parent_id is invalid");
+        }
+    }
+
+    private void updateDescendantTreeLevels(Long facilityId, int treeLevelDelta) {
+        if (treeLevelDelta == 0) {
+            return;
+        }
+
+        jdbcTemplate.update("""
+                WITH RECURSIVE descendants AS (
+                    SELECT facility_id
+                      FROM facilities_tree
+                     WHERE parent_id = ?
+                       AND deleted_at IS NULL
+                    UNION ALL
+                    SELECT child.facility_id
+                      FROM facilities_tree child
+                      JOIN descendants parent
+                        ON child.parent_id = parent.facility_id
+                     WHERE child.deleted_at IS NULL
+                )
+                UPDATE facilities_tree
+                   SET tree_level = tree_level + ?,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE facility_id IN (SELECT facility_id FROM descendants)
+                """, facilityId, treeLevelDelta);
+    }
+
+    private void copyRelatedRows(Long sourceFacilityId, Long copiedFacilityId) {
+        copyFacilityImages(sourceFacilityId, copiedFacilityId);
+        copyMaps(sourceFacilityId, copiedFacilityId);
+        copyRoles(sourceFacilityId, copiedFacilityId);
+        copyEquipments(sourceFacilityId, copiedFacilityId);
+        copyAnnotations(sourceFacilityId, copiedFacilityId);
+    }
+
+    private void copyFacilityImages(Long sourceFacilityId, Long copiedFacilityId) {
+        jdbcTemplate.update("""
+                INSERT INTO facility_images (
+                    facility_id,
+                    file_id,
+                    image_name,
+                    shooting_height,
+                    ceiling_height,
+                    created_at,
+                    updated_at
+                )
+                SELECT ?,
+                       file_id,
+                       image_name,
+                       shooting_height,
+                       ceiling_height,
+                       CURRENT_TIMESTAMP,
+                       CURRENT_TIMESTAMP
+                  FROM facility_images
+                 WHERE facility_id = ?
+                   AND deleted_at IS NULL
+                """, copiedFacilityId, sourceFacilityId);
+    }
+
+    private void copyMaps(Long sourceFacilityId, Long copiedFacilityId) {
+        jdbcTemplate.update("""
+                INSERT INTO maps (
+                    facility_id,
+                    file_id,
+                    map_name,
+                    image_width,
+                    image_height,
+                    created_at,
+                    updated_at
+                )
+                SELECT ?,
+                       file_id,
+                       map_name,
+                       image_width,
+                       image_height,
+                       CURRENT_TIMESTAMP,
+                       CURRENT_TIMESTAMP
+                  FROM maps
+                 WHERE facility_id = ?
+                   AND deleted_at IS NULL
+                """, copiedFacilityId, sourceFacilityId);
+    }
+
+    private void copyRoles(Long sourceFacilityId, Long copiedFacilityId) {
+        jdbcTemplate.update("""
+                INSERT INTO facility_role_permission (
+                    permission_id,
+                    facility_id,
+                    keycloak_role_id,
+                    keycloak_role_name,
+                    created_at,
+                    updated_at
+                )
+                SELECT permission_id,
+                       ?,
+                       keycloak_role_id,
+                       keycloak_role_name,
+                       CURRENT_TIMESTAMP,
+                       CURRENT_TIMESTAMP
+                  FROM facility_role_permission
+                 WHERE facility_id = ?
+                   AND deleted_at IS NULL
+                """, copiedFacilityId, sourceFacilityId);
+    }
+
+    private void copyEquipments(Long sourceFacilityId, Long copiedFacilityId) {
+        jdbcTemplate.update("""
+                INSERT INTO equipments (
+                    facility_id,
+                    equipment_master_id,
+                    yaw,
+                    pitch,
+                    created_at,
+                    updated_at
+                )
+                SELECT ?,
+                       equipment_master_id,
+                       yaw,
+                       pitch,
+                       CURRENT_TIMESTAMP,
+                       CURRENT_TIMESTAMP
+                  FROM equipments
+                 WHERE facility_id = ?
+                   AND deleted_at IS NULL
+                """, copiedFacilityId, sourceFacilityId);
+    }
+
+    private void copyAnnotations(Long sourceFacilityId, Long copiedFacilityId) {
+        jdbcTemplate.update("""
+                INSERT INTO annotations (
+                    facility_id,
+                    annotation_type,
+                    annotation_title,
+                    annotation_content,
+                    created_by,
+                    display_expire_type,
+                    display_expire_at,
+                    yaw,
+                    pitch,
+                    created_at,
+                    updated_at
+                )
+                SELECT ?,
+                       annotation_type,
+                       annotation_title,
+                       annotation_content,
+                       created_by,
+                       display_expire_type,
+                       display_expire_at,
+                       yaw,
+                       pitch,
+                       CURRENT_TIMESTAMP,
+                       CURRENT_TIMESTAMP
+                  FROM annotations
+                 WHERE facility_id = ?
+                   AND deleted_at IS NULL
+                """, copiedFacilityId, sourceFacilityId);
+    }
+
     private void validateCreateRequestKeys(Map<String, Object> request) {
         if (request.containsKey("annotations")) {
             throw invalidRequest("annotations is invalid");
@@ -933,11 +1211,11 @@ public class FacilitiesService {
         }
     }
 
-    private Long permissionId(String permissionCode) {
+    private Long permissionId(Long permissionCode) {
         List<Long> results = jdbcTemplate.query("""
                 SELECT permission_id
                   FROM permission_master
-                 WHERE permission_name = ?
+                 WHERE permission_id = ?
                    AND deleted_at IS NULL
                 """, (rs, rowNum) -> rs.getLong("permission_id"), permissionCode);
 
@@ -1187,6 +1465,14 @@ public class FacilitiesService {
                 HttpStatus.FORBIDDEN,
                 "permission_denied",
                 "施設を登録する権限がありません"
+        );
+    }
+
+    private KeycloakAdminException conflict() {
+        return new KeycloakAdminException(
+                HttpStatus.CONFLICT,
+                "conflict",
+                "対象データが他ユーザにより更新されています"
         );
     }
 

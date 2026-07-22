@@ -861,6 +861,52 @@ Important:
 The roles array inside the POST /facilities request body is for permissions on the new facility.
 It does not give the current login user permission to create under the parent.
 
+How to check roles in DB:
+
+Use this to see all facility role permission rows:
+
+SELECT *
+FROM facility_role_permission
+ORDER BY facility_role_permission_id;
+
+Use this to check one facility only:
+
+SELECT *
+FROM facility_role_permission
+WHERE facility_id = 1110
+  AND deleted_at IS NULL
+ORDER BY facility_role_permission_id;
+
+Use this to see the permission name together with the numeric permission_id:
+
+SELECT
+  frp.facility_role_permission_id,
+  frp.facility_id,
+  frp.keycloak_role_id,
+  frp.keycloak_role_name,
+  frp.permission_id,
+  pm.permission_name,
+  frp.created_at,
+  frp.updated_at,
+  frp.deleted_at
+FROM facility_role_permission frp
+JOIN permission_master pm
+  ON pm.permission_id = frp.permission_id
+WHERE frp.deleted_at IS NULL
+ORDER BY frp.facility_id, frp.facility_role_permission_id;
+
+Use this exact check before USER_ADMIN POST /facilities:
+
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 1110
+  AND keycloak_role_id = 'USER_ADMIN'
+  AND deleted_at IS NULL;
+
+Expected:
+permission_count >= 1
+
 
 1-5-2 facility_name
 -------------------
@@ -1016,11 +1062,18 @@ Example:
 1-5-21 roles.permission_code
 ----------------------------
 
-Set a value that exists in PERMISSION_MASTER.PERMISSION_NAME.
+Set a numeric value that exists in PERMISSION_MASTER.PERMISSION_ID.
 
 Example:
-"VR画像参照"
-"付箋参照"
+20
+30
+
+Mapping:
+- 10 = 施設編集
+- 20 = VR画像参照
+- 30 = 付箋参照
+- 40 = 付箋追加・変更・削除
+- 50 = 設備参照
 
 
 1-5-22 equipments
@@ -1090,11 +1143,11 @@ Body:
   "roles": [
     {
       "keycloak_role_id": "R_USER01",
-      "permission_code": "VR画像参照"
+      "permission_code": 20
     },
     {
       "keycloak_role_id": "R_PJMGR01",
-      "permission_code": "付箋参照"
+      "permission_code": 30
     }
   ],
   "equipments": [

@@ -190,14 +190,11 @@ public class FilesService {
                     ON m.facility_id = ft.parent_id
                   JOIN facility_role_permission frp
                     ON frp.facility_id = ft.facility_id
-                  JOIN permission_master pm
-                    ON pm.permission_id = frp.permission_id
                  WHERE m.file_id = ?
-                   AND pm.permission_name = 'vr_image_view'
+                   AND frp.permission_id = 20
                    AND frp.keycloak_role_id IN (%s)
                    AND ft.deleted_at IS NULL
                    AND frp.deleted_at IS NULL
-                   AND pm.deleted_at IS NULL
                    AND m.deleted_at IS NULL
                 """, fileId, userRoles) > 0;
     }
@@ -210,14 +207,11 @@ public class FilesService {
                     ON fi.facility_id = ft.facility_id
                   JOIN facility_role_permission frp
                     ON frp.facility_id = ft.facility_id
-                  JOIN permission_master pm
-                    ON pm.permission_id = frp.permission_id
                  WHERE fi.file_id = ?
-                   AND pm.permission_name = 'vr_image_view'
+                   AND frp.permission_id = 20
                    AND frp.keycloak_role_id IN (%s)
                    AND ft.deleted_at IS NULL
                    AND frp.deleted_at IS NULL
-                   AND pm.deleted_at IS NULL
                    AND fi.deleted_at IS NULL
                 """, fileId, userRoles) > 0;
     }
@@ -233,16 +227,12 @@ public class FilesService {
                         ON a.facility_id = ft.facility_id
                       JOIN facility_role_permission frp
                         ON frp.facility_id = ft.facility_id
-                      JOIN permission_master pm
-                        ON pm.permission_id = frp.permission_id
                      WHERE af.file_id = ?
-                       AND pm.permission_name IN ('annotation_view', 'annotation_manage')
+                       AND frp.permission_id IN (30, 40)
                        AND frp.keycloak_role_id IN (%s)
                        AND ft.deleted_at IS NULL
                        AND frp.deleted_at IS NULL
-                       AND pm.deleted_at IS NULL
                        AND a.deleted_at IS NULL
-                       AND af.deleted_at IS NULL
                     """, fileId, userRoles) > 0;
         } catch (BadSqlGrammarException exception) {
             return false;

@@ -1685,7 +1685,7 @@ Postman body:
     {
       "keycloak_role_id": "NO_SUCH_ROLE",
       "keycloak_role_name": "NO_SUCH_ROLE",
-      "permission_code": "facility_view"
+      "permission_code": 20
     }
   ]
 }
@@ -1725,7 +1725,7 @@ Postman body:
     {
       "keycloak_role_id": "SYS_ADMIN",
       "keycloak_role_name": "SYS_ADMIN",
-      "permission_code": "facility_view"
+      "permission_code": 20
     }
   ]
 }
@@ -1745,11 +1745,11 @@ Pass:
 The API returns invalid_request and no facility is created.
 
 
-1-5-20 roles.permission_codeにPERMISSION_MASTER.PERMITTION_IDに無い文字列を指定する
+1-5-20 roles.permission_codeにPERMISSION_MASTER.PERMITTION_IDに無い値を指定する
 ----------------------------------------------------------------------------------
 
 Meaning:
-roles.permission_code does not exist in permission_master.
+roles.permission_code must be a numeric permission_id that exists in permission_master.
 
 Postman body:
 
@@ -1765,7 +1765,7 @@ Postman body:
     {
       "keycloak_role_id": "viewer",
       "keycloak_role_name": "viewer",
-      "permission_code": "NO_SUCH_PERMISSION"
+      "permission_code": 999999
     }
   ]
 }
@@ -2002,7 +2002,7 @@ Before test data:
 - Use an existing parent facility_id. With sample_data_DB設計.sql, use parent_id 1110.
 - Prepare one VR image file row in FILES. With sample_data_DB設計.sql, use file_id 5000.
 - Prepare one map image file row in FILES. With sample_data_DB設計.sql, use file_id 5009.
-- Prepare permission names in PERMISSION_MASTER. With sample_data_DB設計.sql, use Japanese names such as VR画像参照 and 付箋参照.
+- Prepare permission IDs in PERMISSION_MASTER. With sample_data_DB設計.sql, use numeric IDs such as 20 for VR画像参照 and 30 for 付箋参照.
 - Prepare equipment IDs in EQUIPMENT_MASTERS. With sample_data_DB設計.sql, use equipment_id 10.
 - Use Keycloak roles that exist and are not SYS_ADMIN.
 
@@ -2031,11 +2031,11 @@ Example request body:
   "roles": [
     {
       "keycloak_role_id": "R_USER01",
-      "permission_code": "VR画像参照"
+      "permission_code": 20
     },
     {
       "keycloak_role_id": "R_USER01",
-      "permission_code": "付箋参照"
+      "permission_code": 30
     }
   ],
   "equipments": [
@@ -2344,7 +2344,14 @@ Meaning:
 Use permission codes that exist in PERMISSION_MASTER.
 
 Check:
-Use valid permission_code values from PERMISSION_MASTER, such as VR画像参照 or 付箋参照.
+Use valid numeric permission_code values from PERMISSION_MASTER.PERMISSION_ID.
+
+Mapping:
+- 10 = 施設編集
+- 20 = VR画像参照
+- 30 = 付箋参照
+- 40 = 付箋追加・変更・削除
+- 50 = 設備参照
 
 Pass:
 The API accepts the permission codes and stores them.

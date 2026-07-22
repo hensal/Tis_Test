@@ -175,11 +175,11 @@ POST create with VR image, map, roles, and equipment:
   "roles": [
     {
       "keycloak_role_id": "R_USER01",
-      "permission_code": "VR画像参照"
+      "permission_code": 20
     },
     {
       "keycloak_role_id": "R_USER01",
-      "permission_code": "付箋参照"
+      "permission_code": 30
     }
   ],
   "equipments": [

@@ -1,5 +1,5 @@
-Files API Non-SYS_ADMIN Download Permission Test Guide
-======================================================
+files（SYS_ADMINロールを持たないユーザ）
+======================================
 
 Purpose
 -------
@@ -40,6 +40,171 @@ The API behavior should be:
       "expires_at": "..."
     }
   }
+
+
+1-3 リクエストパラメータ（バイナリファイルの送信時）
+------------------------------------------------------
+
+Purpose:
+Test file upload using binary file data.
+
+API:
+
+  POST http://localhost:8081/files
+
+Required header:
+
+  Authorization: Bearer <access_token>
+
+Important:
+Do not manually type Content-Type in Postman.
+When Body is form-data, Postman automatically creates:
+
+  Content-Type: multipart/form-data; boundary=...
+
+If you manually set Content-Type incorrectly, Spring Boot may return:
+
+  415 Unsupported Media Type
+
+Postman setup:
+
+1. Method:
+
+   POST
+
+2. URL:
+
+   http://localhost:8081/files
+
+3. Headers:
+
+   Authorization: Bearer <access_token>
+
+4. Body:
+
+   Select form-data.
+
+5. Add these rows:
+
+   key        type    value
+   file_type  Text    annotation
+   file       File    select a real file, for example example_aws_s3_minio.pdf
+
+Allowed file_type values:
+
+  annotation
+  vr_image
+  map_image
+
+Example for annotation upload:
+
+  file_type = annotation
+  file      = example_aws_s3_minio.pdf
+
+Expected success response:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "file_id": 5012,
+    "file_name": "example_aws_s3_minio.pdf",
+    "file_path": "/5012",
+    "file_type": "annotation",
+    "file_size": 2439,
+    "s3_bucket": "http://localhost:9000/vr-view-bucket",
+    "created_at": "2026/07/22 10:29:35"
+  }
+}
+
+DB check after upload:
+
+SELECT
+  file_id,
+  file_name,
+  file_path,
+  file_type,
+  file_size,
+  s3_bucket,
+  created_at,
+  deleted_at
+FROM files
+WHERE file_id = <response_file_id>;
+
+Expected DB values:
+
+  file_id    = response data.file_id
+  file_name  = uploaded original file name
+  file_path  = "/" + response file_id
+  file_type  = request file_type
+  file_size  = uploaded file size in bytes
+  s3_bucket  = MinIO bucket URL
+  deleted_at = NULL
+
+MinIO check after upload:
+
+1. Open MinIO console:
+
+   http://localhost:9001
+
+2. Open bucket:
+
+   vr-view-bucket
+
+3. Confirm the uploaded file exists under:
+
+   <file_id>/<file_name>
+
+Example:
+
+  5012/example_aws_s3_minio.pdf
+
+Validation error cases:
+
+1. Missing file:
+
+   Body has file_type, but no file.
+
+   Expected:
+
+   {
+     "success": false,
+     "error_code": "validation_error",
+     "message": "リクエストパラメータが不正です",
+     "errors": {
+       "file": [
+         "この項目は必須です"
+       ]
+     },
+     "data": null
+   }
+
+2. Missing or invalid file_type:
+
+   file_type is empty, or not one of annotation / vr_image / map_image.
+
+   Expected:
+
+   {
+     "success": false,
+     "error_code": "validation_error",
+     "message": "リクエストパラメータが不正です",
+     "errors": {
+       "file_type": [
+         "annotation、vr_image、map_image のいずれかを指定してください"
+       ]
+     },
+     "data": null
+   }
+
+3. Wrong Content-Type:
+
+   Example:
+   Body is raw JSON, or Header Content-Type is application/json.
+
+   Expected:
+   Spring Boot can return 415 Unsupported Media Type because POST /files only accepts multipart/form-data.
 
 
 Important Concept
@@ -183,10 +348,7 @@ CREATE TABLE IF NOT EXISTS annotations (
 CREATE TABLE IF NOT EXISTS annotation_files (
     annotation_file_id BIGSERIAL PRIMARY KEY,
     annotation_id BIGINT NOT NULL REFERENCES annotations(annotation_id),
-    file_id BIGINT NOT NULL REFERENCES files(file_id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMPTZ
+    file_id BIGINT NOT NULL REFERENCES files(file_id)
 );
 
 CREATE TABLE IF NOT EXISTS permission_master (
@@ -328,13 +490,22 @@ VALUES
 ------------------------------------------------------------
 
 
-Test Case 1: map_image Without Reference Role
----------------------------------------------
+2-2-3 参照ロールの無いfile_idを指定した(file_idのfile_type=map_imageの場合)
+-----------------------------------------------------------------------------
+
+Meaning:
+Use a map_image file_id where the login user's role does not have the required reference permission.
+
+Yellow note from Excel:
+Confirm that the API returns an error when permission does not exist.
+Also keep DB evidence showing whether the permission exists or not.
+
 File:
 
   file_id = 101
   file_type = map_image
 
+Step 1: confirm DB permission does not exist.
 Before inserting permission, this SQL should return 0:
 
 SELECT COUNT(*) AS permission_count
@@ -343,14 +514,11 @@ JOIN facilities_tree ft
   ON m.facility_id = ft.parent_id
 JOIN facility_role_permission frp
   ON frp.facility_id = ft.facility_id
-JOIN permission_master pm
-  ON pm.permission_id = frp.permission_id
 WHERE m.file_id = 101
-  AND pm.permission_name = 'vr_image_view'
+  AND frp.permission_id = 20
   AND frp.keycloak_role_id IN ('viewer')
   AND ft.deleted_at IS NULL
   AND frp.deleted_at IS NULL
-  AND pm.deleted_at IS NULL
   AND m.deleted_at IS NULL;
 
 Expected API result with user03/viewer token:
@@ -365,6 +533,10 @@ GET http://localhost:8081/files/101
   "data": null
 }
 
+Step 2: test in Postman.
+Because permission_count is 0, GET /files/101 must return permission_denied.
+
+Step 3: add the permission and confirm the positive case.
 Now insert permission:
 
 INSERT INTO facility_role_permission (
@@ -398,13 +570,22 @@ GET http://localhost:8081/files/101
 }
 
 
-Test Case 2: vr_image Without Reference Role
---------------------------------------------
+2-2-4 参照ロールの無いfile_idを指定した(file_idのfile_type=vr_imageの場合)
+----------------------------------------------------------------------------
+
+Meaning:
+Use a vr_image file_id where the login user's role does not have the required reference permission.
+
+Yellow note from Excel:
+Confirm that the API returns an error when permission does not exist.
+Also keep DB evidence showing whether the permission exists or not.
+
 File:
 
   file_id = 102
   file_type = vr_image
 
+Step 1: confirm DB permission does not exist.
 Before inserting permission, this SQL should return 0:
 
 SELECT COUNT(*) AS permission_count
@@ -413,14 +594,11 @@ JOIN facilities_tree ft
   ON fi.facility_id = ft.facility_id
 JOIN facility_role_permission frp
   ON frp.facility_id = ft.facility_id
-JOIN permission_master pm
-  ON pm.permission_id = frp.permission_id
 WHERE fi.file_id = 102
-  AND pm.permission_name = 'vr_image_view'
+  AND frp.permission_id = 20
   AND frp.keycloak_role_id IN ('viewer')
   AND ft.deleted_at IS NULL
   AND frp.deleted_at IS NULL
-  AND pm.deleted_at IS NULL
   AND fi.deleted_at IS NULL;
 
 Expected API result:
@@ -435,6 +613,10 @@ GET http://localhost:8081/files/102
   "data": null
 }
 
+Step 2: test in Postman.
+Because permission_count is 0, GET /files/102 must return permission_denied.
+
+Step 3: add the permission and confirm the positive case.
 Now insert permission:
 
 INSERT INTO facility_role_permission (
@@ -455,13 +637,22 @@ GET http://localhost:8081/files/102
 Success response with file_url.
 
 
-Test Case 3: annotation Without Reference Role
-----------------------------------------------
+2-2-5 参照ロールの無いfile_idを指定した(file_idのfile_type=annotationの場合)
+-----------------------------------------------------------------------------
+
+Meaning:
+Use an annotation file_id where the login user's role does not have annotation reference permission.
+
+Yellow note from Excel:
+Confirm that the API returns an error when permission does not exist.
+Also keep DB evidence showing whether the permission exists or not.
+
 File:
 
   file_id = 103
   file_type = annotation
 
+Step 1: confirm DB permission does not exist.
 Before inserting permission, this SQL should return 0:
 
 SELECT COUNT(*) AS permission_count
@@ -472,16 +663,12 @@ JOIN facilities_tree ft
   ON a.facility_id = ft.facility_id
 JOIN facility_role_permission frp
   ON frp.facility_id = ft.facility_id
-JOIN permission_master pm
-  ON pm.permission_id = frp.permission_id
 WHERE af.file_id = 103
-  AND pm.permission_name IN ('annotation_view', 'annotation_manage')
+  AND frp.permission_id IN (30, 40)
   AND frp.keycloak_role_id IN ('viewer')
   AND ft.deleted_at IS NULL
   AND frp.deleted_at IS NULL
-  AND pm.deleted_at IS NULL
-  AND a.deleted_at IS NULL
-  AND af.deleted_at IS NULL;
+  AND a.deleted_at IS NULL;
 
 Expected API result:
 
@@ -495,6 +682,10 @@ GET http://localhost:8081/files/103
   "data": null
 }
 
+Step 2: test in Postman.
+Because permission_count is 0, GET /files/103 must return permission_denied.
+
+Step 3: add the permission and confirm the positive case.
 Now insert permission:
 
 INSERT INTO facility_role_permission (
@@ -513,6 +704,239 @@ Expected API result:
 GET http://localhost:8081/files/103
 
 Success response with file_url.
+
+
+Practical setup for a newly uploaded annotation file
+----------------------------------------------------
+
+Use this when POST /files already created an annotation file, but GET /files/{fileId}
+still returns permission_denied.
+
+Example working values:
+
+  file_id = 5012
+  file_type = annotation
+  facility_id = 1110
+  login role = viewer
+
+Required DB chain:
+
+  files
+    -> annotation_files
+    -> annotations
+    -> facilities_tree
+    -> facility_role_permission
+
+For annotation file download:
+
+  permission_id = 30 means annotation view
+  permission_id = 40 means annotation add/update/delete
+
+Step A: confirm the uploaded file exists.
+
+SELECT file_id, file_name, file_path, file_type, file_size, s3_bucket
+FROM files
+WHERE file_id = 5012;
+
+Expected:
+file_type = annotation
+
+Step B: ensure annotation type master exists.
+
+Run this if annotation_type = '01' does not exist:
+
+INSERT INTO annotation_type_master (
+  annotation_type,
+  annotation_type_name
+)
+SELECT '01', 'normal'
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM annotation_type_master
+  WHERE annotation_type = '01'
+);
+
+Step C: create an annotation row linked to the facility.
+
+Note:
+In DB設計.md, annotation_files is only a link table.
+It has annotation_file_id, annotation_id, and file_id.
+It does not need deleted_at.
+
+INSERT INTO annotations (
+  facility_id,
+  yaw,
+  pitch,
+  annotation_type,
+  annotation_title,
+  annotation_content,
+  display_expire_type,
+  created_by
+)
+VALUES (
+  1110,
+  0,
+  0,
+  '01',
+  'test annotation',
+  'test annotation file',
+  false,
+  'tester'
+)
+RETURNING annotation_id;
+
+Copy the returned annotation_id.
+
+Step D: link the uploaded file to the annotation.
+
+INSERT INTO annotation_files (
+  annotation_id,
+  file_id
+)
+VALUES (
+  <returned_annotation_id>,
+  5012
+);
+
+Example:
+
+INSERT INTO annotation_files (
+  annotation_id,
+  file_id
+)
+VALUES (
+  22,
+  5012
+);
+
+Step E: give the login role annotation download permission on the same facility.
+
+If the login user's /api/keycloak/me response contains this role:
+
+  viewer
+
+then keycloak_role_id must also be:
+
+  viewer
+
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name
+)
+VALUES (
+  30,
+  1110,
+  'viewer',
+  'viewer'
+);
+
+If this row already exists, do not insert a duplicate. Check first:
+
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE permission_id IN (30, 40)
+  AND facility_id = 1110
+  AND keycloak_role_id = 'viewer'
+  AND deleted_at IS NULL;
+
+Expected:
+permission_count >= 1
+
+Step F: confirm the full DB permission chain.
+
+SELECT
+  f.file_id,
+  f.file_type,
+  af.annotation_id,
+  a.facility_id,
+  frp.permission_id,
+  frp.keycloak_role_id
+FROM files f
+JOIN annotation_files af
+  ON af.file_id = f.file_id
+JOIN annotations a
+  ON a.annotation_id = af.annotation_id
+JOIN facilities_tree ft
+  ON ft.facility_id = a.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE f.file_id = 5012
+  AND frp.permission_id IN (30, 40)
+  AND frp.keycloak_role_id = 'viewer'
+  AND ft.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+  AND a.deleted_at IS NULL;
+
+Expected:
+One row where:
+
+  file_id = 5012
+  file_type = annotation
+  facility_id = 1110
+  permission_id = 30 or 40
+  keycloak_role_id = viewer
+
+Step G: test in Postman.
+
+GET http://localhost:8081/files/5012
+
+Headers:
+
+  Authorization: Bearer <user03/viewer access_token>
+
+Expected:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "file_id": 5012,
+    "file_url": "...",
+    "file_name": "...",
+    "file_type": "annotation",
+    "file_size": 2439,
+    "created_at": "...",
+    "expires_at": "..."
+  }
+}
+
+Troubleshooting checklist for permission_denied:
+
+1. The access token must be new.
+   After assigning the Keycloak role, get a new token.
+
+2. The token role and DB role must match exactly.
+   Example:
+   /api/keycloak/me returns:
+     "viewer"
+   Then DB must use:
+     facility_role_permission.keycloak_role_id = 'viewer'
+
+3. The file_type decides which permission check is used.
+   map_image  -> permission_id = 20
+   vr_image   -> permission_id = 20
+   annotation -> permission_id = 30 or 40
+
+4. For annotation files, annotation_files must link the file to an annotation.
+   Required chain:
+     files.file_id
+       -> annotation_files.file_id
+       -> annotation_files.annotation_id
+       -> annotations.annotation_id
+       -> annotations.facility_id
+       -> facility_role_permission.facility_id
+
+5. annotation_files does not need deleted_at.
+   According to DB設計.md, it is only a link table:
+     annotation_file_id
+     annotation_id
+     file_id
+
+6. If GET /files/{fileId} still returns permission_denied, run Step F.
+   If Step F returns 0 rows, the DB permission chain is still incomplete.
 
 
 Postman Steps
@@ -580,4 +1004,3 @@ Troubleshooting
        {file_id}/{file_name}
      Example:
        101/test-map.png
-

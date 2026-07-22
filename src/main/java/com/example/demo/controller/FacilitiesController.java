@@ -91,39 +91,39 @@ public class FacilitiesController {
 
     @PutMapping("/{facilityId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> updateFacility(
-            @PathVariable Long facilityId,
+            @PathVariable String facilityId,
             @RequestBody Map<String, Object> request
     ) {
         return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.updateFacility(facilityId, request))
+                ApiResponse.ok(facilitiesService.updateFacility(parseFacilityId(facilityId), request))
         );
     }
 
     @DeleteMapping("/{facilityId}")
     public ResponseEntity<ApiResponse<Void>> deleteFacility(
-            @PathVariable Long facilityId
+            @PathVariable String facilityId
     ) {
-        facilitiesService.deleteFacility(facilityId);
+        facilitiesService.deleteFacility(parseFacilityId(facilityId));
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     @PostMapping("/{facilityId}/move")
     public ResponseEntity<ApiResponse<Map<String, Object>>> moveFacility(
-            @PathVariable Long facilityId,
+            @PathVariable String facilityId,
             @RequestBody Map<String, Object> request
     ) {
         return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.moveFacility(facilityId, request))
+                ApiResponse.ok(facilitiesService.moveFacility(parseFacilityId(facilityId), request))
         );
     }
 
     @PostMapping("/{facilityId}/copy")
     public ResponseEntity<ApiResponse<Map<String, Object>>> copyFacility(
-            @PathVariable Long facilityId,
+            @PathVariable String facilityId,
             @RequestBody Map<String, Object> request
     ) {
         return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.copyFacility(facilityId, request))
+                ApiResponse.ok(facilitiesService.copyFacility(parseFacilityId(facilityId), request))
         );
     }
 

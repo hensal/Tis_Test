@@ -104,7 +104,8 @@ Related information such as images, maps, map positions, permissions, equipment,
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
 | facilityId | BIGINT | Yes | Source facility ID specified in the path. |
-| target_facility_id | BIGINT | Yes | Destination facility ID. After moving, the source facility is placed as a child of this facility. |
+| parent_id | BIGINT | Yes | Destination parent facility ID. Use null to move under the root. |
+| target_facility_id | BIGINT | No | Sibling facility immediately before the moved facility in the destination parent. Use null when no sibling is specified. |
 
 
 ### Copy Facility
@@ -112,7 +113,8 @@ Related information such as images, maps, map positions, permissions, equipment,
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
 | facilityId | BIGINT | Yes | Source facility ID specified in the path. |
-| target_facility_id | BIGINT | Yes | Destination facility ID. After copying, the copied facility is placed as a child of this facility. |
+| parent_id | BIGINT | Yes | Destination parent facility ID. Use null to copy under the root. |
+| target_facility_id | BIGINT | No | Sibling facility immediately before the copied facility in the destination parent. Use null when no sibling is specified. |
 
 
 ## Request Examples
@@ -161,6 +163,7 @@ GET /facilities/1001/view-html
 ### Move Facility
 
 {
+  "parent_id": 100,
   "target_facility_id": 200
 }
 
@@ -168,6 +171,7 @@ GET /facilities/1001/view-html
 ### Copy Facility
 
 {
+  "parent_id": 100,
   "target_facility_id": 300
 }
 
@@ -218,7 +222,7 @@ GET /facilities/1001/view-html
       {
         "keycloak_role_id": "8c1b1111-2222-3333-4444-abcdef123456",
         "keycloak_role_name": "admin",
-        "permission_code": "equipment_view"
+        "permission_code": 50
       }
     ],
     "equipments": [
@@ -382,5 +386,6 @@ GET /facilities/1001/view-html
 - Display helper values such as whether images, annotations, or equipment exist may be derived from related data.
 - For move and copy:
   - The source facility is specified by the path facilityId.
-  - The destination facility is specified by body target_facility_id.
+  - The destination parent is specified by body parent_id.
+  - The sibling position is specified by body target_facility_id.
 - If the admin screen uses bulk save for facility editing, related edit contents may be saved together in the facility update API.
