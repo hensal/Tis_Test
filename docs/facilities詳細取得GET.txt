@@ -1,0 +1,1716 @@
+facilities詳細取得GET
+======================
+
+Source checked:
+- Excel file: APIテスト仕様書(facilities).xlsx
+- Excel sheet: facilities詳細取得GET
+- Code checked:
+  - src/main/java/com/example/demo/controller/FacilitiesController.java
+  - src/main/java/com/example/demo/service/FacilitiesService.java
+
+Common Postman setup
+--------------------
+Endpoint base:
+http://localhost:8081/facilities
+
+Header:
+Authorization: Bearer <access_token>
+
+Use a SYS_ADMIN token for this Excel section unless the test case says otherwise.
+
+Useful SQL: list facility IDs before testing
+--------------------------------------------
+Use this first to see all facility IDs in the DB:
+
+SELECT facility_id, parent_id, facility_name, deleted_at
+FROM facilities_tree
+ORDER BY facility_id;
+
+Use this to see only active facilities:
+
+SELECT facility_id, parent_id, facility_name
+FROM facilities_tree
+WHERE deleted_at IS NULL
+ORDER BY facility_id;
+
+If your DB still uses old column names, use this instead:
+
+SELECT facility_id, parent_id, node_name, deleted_at
+FROM facilities_tree
+ORDER BY facility_id;
+
+Standard check pattern for every response item
+----------------------------------------------
+For each item in this document, use this order:
+1. First find a facility_id that has the required test data in DB.
+2. Send GET http://localhost:8081/facilities/<facility_id> in Postman.
+3. Run the item-specific SQL.
+4. Compare the SQL result with the JSON response field.
+
+For example:
+- images: first find a facility_id that has facility_images data.
+- maps: first find a facility_id whose parent has maps data.
+- map_points: first find a facility_id whose parent map has map_points data.
+- roles: first find a facility_id that has facility_role_permission data.
+- equipments: first find a facility_id that has equipments data.
+- annotations: first find a facility_id that has annotations data.
+
+Expected common error response:
+{
+  "success": false,
+  "error_code": "invalid_request",
+  "message": "リクエストパラメータが不正です",
+  "errors": null,
+  "data": null
+}
+
+1-1-5 facilityid=存在しないファシリティIDを指定
+------------------------------------------------
+Meaning:
+Send a facility_id that does not exist in facilities_tree.
+
+Before Postman, confirm the ID does not exist:
+SELECT facility_id
+FROM facilities_tree
+WHERE facility_id = 999999999
+  AND deleted_at IS NULL;
+
+Expected DB result:
+0 rows.
+
+Postman:
+GET http://localhost:8081/facilities/999999999
+
+Expected by Excel:
+A normal success response is returned with 0 records / no facility data.
+
+Code check:
+Current code calls FacilitiesService.getActiveFacility().
+If no row exists, current code returns:
+{
+  "success": false,
+  "error_code": "not_found",
+  "message": "対象施設が見つかりません",
+  "errors": null,
+  "data": null
+}
+
+So this item is not fully aligned with the Excel yet if the Excel strictly requires success=true for 0 records.
+
+1-1-6 facilityidが数値化できない文字列である
+------------------------------------------------
+Meaning:
+Send a facility_id that cannot be converted to a number.
+
+Postman:
+GET http://localhost:8081/facilities/abc
+
+Expected response:
+The common invalid_request error response is returned.
+
+Code check:
+Current code checks !facilityId.matches("\\d+"), so this requirement is handled.
+
+1-1-7 facilityidが19byteより多い文字列である
+------------------------------------------------
+Meaning:
+Send a facility_id string longer than 19 bytes.
+For ASCII numbers, 20 digits = 20 bytes, so this is enough for the test.
+
+Postman:
+GET http://localhost:8081/facilities/12345678901234567890
+
+Expected response:
+The common invalid_request error response is returned.
+
+Code check:
+Current code checks facilityId.getBytes(StandardCharsets.UTF_8).length > 19, so this requirement is handled.
+
+1-1-8 {facilityId}/vr-view以外のサブパラメータが指定されている
+----------------------------------------------------------------
+Meaning:
+Send a sub path other than the allowed vr-view path.
+
+Postman:
+GET http://localhost:8081/facilities/1/invalid-sub-path
+
+Expected response:
+The common invalid_request error response is returned.
+
+Code check:
+Current code has a catch-all endpoint:
+GET /facilities/{facilityId}/{subPath}
+It validates facilityId, then returns invalid_request. So unknown sub paths are handled.
+
+Important note:
+Current code also has:
+GET /facilities/{facilityId}/view-html
+
+If the Excel rule strictly means only /vr-view is allowed, then /view-html is a code/spec mismatch.
+For this test case, use /invalid-sub-path, not /vr-view.
+
+1-2 レスポンスパラメータ
+=========================
+
+Use this section after sending:
+GET http://localhost:8081/facilities/{facility_id}
+
+Replace {facility_id} with a real facility ID that has one facility_images row.
+
+1-2-11 images
+-------------
+Meaning:
+The response data.images list must match the DB result from FACILITY_IMAGES / facility_images.
+For this test, use a facility that has 1 image record.
+
+First find a facility that has image data:
+
+Simple count version:
+
+SELECT
+  ft.facility_id AS test_facility_id,
+  ft.facility_name AS test_facility_name,
+  COUNT(fi.image_id) AS image_count
+FROM facilities_tree ft
+JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+WHERE ft.deleted_at IS NULL
+  AND fi.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.facility_name
+ORDER BY image_count DESC, ft.facility_id ASC;
+
+Use a test_facility_id where image_count is 1 or more.
+For the current Excel test, image_count is normally 0 or 1.
+
+Detail version:
+
+SELECT
+  ft.facility_id,
+  ft.facility_name,
+  fi.image_id,
+  fi.file_id,
+  fi.image_name,
+  fi.shooting_height,
+  fi.ceiling_height
+FROM facilities_tree ft
+JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+WHERE ft.deleted_at IS NULL
+  AND fi.deleted_at IS NULL
+ORDER BY ft.facility_id, fi.image_id;
+
+Excel SQL meaning:
+
+select FACILITY_IMAGES.*
+from FACILITIES_TREE, FACILITY_IMAGES
+where FACILITIES_TREE.FACILITY_ID = 指定されたfacilityid
+  and FACILITIES_TREE.FACILITY_ID = FACILITY_IMAGES.FACILITY_ID
+  and FACILITIES_TREE.DELETED_AT = False
+  and FACILITY_IMAGES.DELETED_AT = False
+order by FACILITY_IMAGES.PHOTO_ID;
+
+PostgreSQL SQL for current DB:
+
+SELECT
+  fi.image_id,
+  fi.file_id,
+  fi.image_name,
+  fi.shooting_height,
+  fi.ceiling_height
+FROM facilities_tree ft
+JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND ft.deleted_at IS NULL
+  AND fi.deleted_at IS NULL
+ORDER BY fi.image_id ASC;
+
+Postman:
+GET http://localhost:8081/facilities/<facility_id>
+
+Expected:
+The response data.images array contains the same row returned by the SQL above.
+
+Example response part:
+{
+  "images": [
+    {
+      "image_id": 1,
+      "file_id": 5000,
+      "image_name": "entrance.jpg",
+      "shooting_height": 1600,
+      "ceiling_height": 3000
+    }
+  ]
+}
+
+Code check:
+Current code reads from facility_images and orders by image_id ASC.
+The Excel says PHOTO_ID / PHOTO_NAME, but the current PostgreSQL table uses image_id / image_name.
+
+1-2-12 image_id
+---------------
+Expected:
+data.images[0].image_id equals the DB value:
+facility_images.image_id
+
+SQL:
+SELECT image_id
+FROM facility_images
+WHERE facility_id = <facility_id>
+  AND deleted_at IS NULL
+ORDER BY image_id ASC;
+
+1-2-13 file_id
+--------------
+Expected:
+data.images[0].file_id equals the DB value:
+facility_images.file_id
+
+SQL:
+SELECT file_id
+FROM facility_images
+WHERE facility_id = <facility_id>
+  AND deleted_at IS NULL
+ORDER BY image_id ASC;
+
+1-2-14 image_name
+-----------------
+Expected:
+data.images[0].image_name equals the DB value:
+facility_images.image_name
+
+SQL:
+SELECT image_name
+FROM facility_images
+WHERE facility_id = <facility_id>
+  AND deleted_at IS NULL
+ORDER BY image_id ASC;
+
+1-2-15 shooting_height
+----------------------
+Expected:
+data.images[0].shooting_height equals the DB value:
+facility_images.shooting_height
+
+SQL:
+SELECT shooting_height
+FROM facility_images
+WHERE facility_id = <facility_id>
+  AND deleted_at IS NULL
+ORDER BY image_id ASC;
+
+1-2-16 ceiling_height
+---------------------
+Expected:
+data.images[0].ceiling_height equals the DB value:
+facility_images.ceiling_height
+
+SQL:
+SELECT ceiling_height
+FROM facility_images
+WHERE facility_id = <facility_id>
+  AND deleted_at IS NULL
+ORDER BY image_id ASC;
+
+1-2-17 maps
+-----------
+Meaning:
+The response data.maps list must match the DB result from MAPS / maps.
+For this test, use a facility whose parent facility has 1 map record.
+
+First find a facility whose parent has map data:
+
+Simple count version:
+
+SELECT
+  child.facility_id AS test_facility_id,
+  child.facility_name AS test_facility_name,
+  parent.facility_id AS parent_facility_id,
+  parent.facility_name AS parent_facility_name,
+  COUNT(m.map_id) AS map_count
+FROM facilities_tree child
+JOIN facilities_tree parent
+  ON child.parent_id = parent.facility_id
+JOIN maps m
+  ON m.facility_id = parent.facility_id
+WHERE child.deleted_at IS NULL
+  AND parent.deleted_at IS NULL
+  AND m.deleted_at IS NULL
+GROUP BY child.facility_id, child.facility_name, parent.facility_id, parent.facility_name
+ORDER BY map_count DESC, child.facility_id ASC;
+
+Use a test_facility_id where map_count is 1 or more.
+
+Detail version:
+
+SELECT
+  child.facility_id AS test_facility_id,
+  child.facility_name AS test_facility_name,
+  parent.facility_id AS parent_facility_id,
+  parent.facility_name AS parent_facility_name,
+  m.map_id,
+  m.file_id,
+  m.map_name
+FROM facilities_tree child
+JOIN facilities_tree parent
+  ON child.parent_id = parent.facility_id
+JOIN maps m
+  ON m.facility_id = parent.facility_id
+WHERE child.deleted_at IS NULL
+  AND parent.deleted_at IS NULL
+  AND m.deleted_at IS NULL
+ORDER BY child.facility_id, m.map_id;
+
+Use test_facility_id from this SQL in Postman.
+
+Excel SQL meaning:
+select MAPS.*
+from FACILITIES_TREE A, FACILITIES_TREE B, MAPS
+where A.FACILITY_ID = 指定されたfacilityid
+  and A.PARENT_FACILITY_ID = B.FACILITY_ID
+  and B.FACILITY_ID = MAPS.FACILITY_ID
+  and A.DELETED_AT = False
+  and B.DELETED_AT = False
+  and MAPS.DELETED_AT = False
+order by MAPS.MAP_ID;
+
+PostgreSQL SQL for current DB:
+SELECT
+  m.map_id,
+  m.file_id,
+  m.map_name
+FROM facilities_tree child
+JOIN facilities_tree parent
+  ON child.parent_id = parent.facility_id
+JOIN maps m
+  ON m.facility_id = parent.facility_id
+WHERE child.facility_id = <facility_id>
+  AND child.deleted_at IS NULL
+  AND parent.deleted_at IS NULL
+  AND m.deleted_at IS NULL
+ORDER BY m.map_id ASC;
+
+Postman:
+GET http://localhost:8081/facilities/<facility_id>
+
+Expected:
+The response data.maps array contains the same row returned by the SQL above.
+
+Example response part:
+{
+  "maps": [
+    {
+      "map_id": 7002,
+      "file_id": 5009,
+      "map_name": "○○団地平面図"
+    }
+  ]
+}
+
+Code check:
+Current code returns map_id, file_id, and map_name from maps.
+For child facilities, it reads maps from the parent facility.
+For root facilities with no parent, current code reads maps from the facility itself.
+
+1-2-18 map_id
+-------------
+Expected:
+data.maps[0].map_id equals the DB value:
+maps.map_id
+
+SQL:
+SELECT m.map_id
+FROM facilities_tree child
+JOIN facilities_tree parent
+  ON child.parent_id = parent.facility_id
+JOIN maps m
+  ON m.facility_id = parent.facility_id
+WHERE child.facility_id = <facility_id>
+  AND child.deleted_at IS NULL
+  AND parent.deleted_at IS NULL
+  AND m.deleted_at IS NULL
+ORDER BY m.map_id ASC;
+
+1-2-19 file_id
+--------------
+Expected:
+data.maps[0].file_id equals the DB value:
+maps.file_id
+
+SQL:
+SELECT m.file_id
+FROM facilities_tree child
+JOIN facilities_tree parent
+  ON child.parent_id = parent.facility_id
+JOIN maps m
+  ON m.facility_id = parent.facility_id
+WHERE child.facility_id = <facility_id>
+  AND child.deleted_at IS NULL
+  AND parent.deleted_at IS NULL
+  AND m.deleted_at IS NULL
+ORDER BY m.map_id ASC;
+
+1-2-20 map_name
+---------------
+Expected:
+data.maps[0].map_name equals the DB value:
+maps.map_name
+
+SQL:
+SELECT m.map_name
+FROM facilities_tree child
+JOIN facilities_tree parent
+  ON child.parent_id = parent.facility_id
+JOIN maps m
+  ON m.facility_id = parent.facility_id
+WHERE child.facility_id = <facility_id>
+  AND child.deleted_at IS NULL
+  AND parent.deleted_at IS NULL
+  AND m.deleted_at IS NULL
+ORDER BY m.map_id ASC;
+
+1-2-21 map_points
+-----------------
+Meaning:
+The response data.map_points list must match the DB result from MAP_POINTS / map_points.
+For this test, use a facility where the related map has multiple map_point records.
+
+First find a facility whose parent has map data and map points:
+
+Simple count version:
+
+SELECT
+  child.facility_id AS test_facility_id,
+  child.facility_name AS test_facility_name,
+  parent.facility_id AS parent_facility_id,
+  m.map_id,
+  COUNT(mp.map_point_id) AS map_point_count
+FROM facilities_tree child
+JOIN facilities_tree parent
+  ON child.parent_id = parent.facility_id
+JOIN maps m
+  ON m.facility_id = parent.facility_id
+JOIN map_points mp
+  ON mp.map_id = m.map_id
+WHERE child.deleted_at IS NULL
+  AND parent.deleted_at IS NULL
+  AND m.deleted_at IS NULL
+  AND mp.deleted_at IS NULL
+GROUP BY child.facility_id, child.facility_name, parent.facility_id, m.map_id
+ORDER BY map_point_count DESC, child.facility_id ASC;
+
+Use a test_facility_id where map_point_count is 1 or more.
+For the Excel multiple-record test, use a test_facility_id where map_point_count is 2 or more.
+
+Detail version:
+
+SELECT
+  child.facility_id AS test_facility_id,
+  child.facility_name AS test_facility_name,
+  parent.facility_id AS parent_facility_id,
+  parent.facility_name AS parent_facility_name,
+  m.map_id,
+  mp.map_point_id,
+  mp.target_id,
+  mp.x,
+  mp.y
+FROM facilities_tree child
+JOIN facilities_tree parent
+  ON child.parent_id = parent.facility_id
+JOIN maps m
+  ON m.facility_id = parent.facility_id
+JOIN map_points mp
+  ON mp.map_id = m.map_id
+WHERE child.deleted_at IS NULL
+  AND parent.deleted_at IS NULL
+  AND m.deleted_at IS NULL
+  AND mp.deleted_at IS NULL
+ORDER BY child.facility_id, m.map_id, mp.map_point_id;
+
+Use test_facility_id from this SQL in Postman.
+
+Excel SQL meaning:
+select MAP_POINTS.*
+from MAPS, MAP_POINTS
+where MAP_POINTS.MAP_ID in (上記で取得したMAPS.MAP_ID)
+  and MAP_POINTS.DELETED_AT = False
+order by MAPS.MAP_ID, MAP_POINTS.MAP_POINT_ID;
+
+PostgreSQL SQL for current DB:
+SELECT
+  mp.map_point_id,
+  mp.map_id,
+  mp.target_id,
+  mp.x,
+  mp.y
+FROM map_points mp
+WHERE mp.map_id IN (
+  SELECT m.map_id
+  FROM facilities_tree child
+  JOIN facilities_tree parent
+    ON child.parent_id = parent.facility_id
+  JOIN maps m
+    ON m.facility_id = parent.facility_id
+  WHERE child.facility_id = <facility_id>
+    AND child.deleted_at IS NULL
+    AND parent.deleted_at IS NULL
+    AND m.deleted_at IS NULL
+)
+  AND mp.deleted_at IS NULL
+ORDER BY mp.map_id ASC, mp.map_point_id ASC;
+
+Postman:
+GET http://localhost:8081/facilities/<facility_id>
+
+Expected:
+The response data.map_points array contains the same rows returned by the SQL above.
+
+Example response part:
+{
+  "map_points": [
+    {
+      "map_point_id": 1,
+      "map_id": 7002,
+      "facility_id": 47,
+      "x_coord": 50.0,
+      "y_coord": -30.0
+    }
+  ]
+}
+
+Code check:
+Current code returns map_point_id, map_id, facility_id, x_coord, and y_coord.
+The response facility_id is map_points.target_id.
+So item 1-2-24 is aligned with the Excel requirement.
+
+1-2-22 map_point_id
+-------------------
+Expected:
+data.map_points[n].map_point_id equals the DB value:
+map_points.map_point_id
+
+SQL:
+SELECT mp.map_point_id
+FROM map_points mp
+WHERE mp.map_id IN (
+  SELECT m.map_id
+  FROM facilities_tree child
+  JOIN facilities_tree parent
+    ON child.parent_id = parent.facility_id
+  JOIN maps m
+    ON m.facility_id = parent.facility_id
+  WHERE child.facility_id = <facility_id>
+    AND child.deleted_at IS NULL
+    AND parent.deleted_at IS NULL
+    AND m.deleted_at IS NULL
+)
+  AND mp.deleted_at IS NULL
+ORDER BY mp.map_id ASC, mp.map_point_id ASC;
+
+1-2-23 map_id
+-------------
+Expected:
+data.map_points[n].map_id equals the DB value:
+map_points.map_id
+
+SQL:
+SELECT mp.map_id
+FROM map_points mp
+WHERE mp.map_id IN (
+  SELECT m.map_id
+  FROM facilities_tree child
+  JOIN facilities_tree parent
+    ON child.parent_id = parent.facility_id
+  JOIN maps m
+    ON m.facility_id = parent.facility_id
+  WHERE child.facility_id = <facility_id>
+    AND child.deleted_at IS NULL
+    AND parent.deleted_at IS NULL
+    AND m.deleted_at IS NULL
+)
+  AND mp.deleted_at IS NULL
+ORDER BY mp.map_id ASC, mp.map_point_id ASC;
+
+1-2-24 facility_id
+------------------
+Expected by Excel:
+data.map_points[n].facility_id equals the DB value:
+map_points.target_id
+
+SQL:
+SELECT mp.target_id
+FROM map_points mp
+WHERE mp.map_id IN (
+  SELECT m.map_id
+  FROM facilities_tree child
+  JOIN facilities_tree parent
+    ON child.parent_id = parent.facility_id
+  JOIN maps m
+    ON m.facility_id = parent.facility_id
+  WHERE child.facility_id = <facility_id>
+    AND child.deleted_at IS NULL
+    AND parent.deleted_at IS NULL
+    AND m.deleted_at IS NULL
+)
+  AND mp.deleted_at IS NULL
+ORDER BY mp.map_id ASC, mp.map_point_id ASC;
+
+Code check:
+Current response does not include this field.
+
+1-2-25 x_coord
+--------------
+Expected:
+data.map_points[n].x_coord equals the DB value:
+map_points.x
+
+SQL:
+SELECT mp.x
+FROM map_points mp
+WHERE mp.map_id IN (
+  SELECT m.map_id
+  FROM facilities_tree child
+  JOIN facilities_tree parent
+    ON child.parent_id = parent.facility_id
+  JOIN maps m
+    ON m.facility_id = parent.facility_id
+  WHERE child.facility_id = <facility_id>
+    AND child.deleted_at IS NULL
+    AND parent.deleted_at IS NULL
+    AND m.deleted_at IS NULL
+)
+  AND mp.deleted_at IS NULL
+ORDER BY mp.map_id ASC, mp.map_point_id ASC;
+
+1-2-26 y_coord
+--------------
+Expected:
+data.map_points[n].y_coord equals the DB value:
+map_points.y
+
+SQL:
+SELECT mp.y
+FROM map_points mp
+WHERE mp.map_id IN (
+  SELECT m.map_id
+  FROM facilities_tree child
+  JOIN facilities_tree parent
+    ON child.parent_id = parent.facility_id
+  JOIN maps m
+    ON m.facility_id = parent.facility_id
+  WHERE child.facility_id = <facility_id>
+    AND child.deleted_at IS NULL
+    AND parent.deleted_at IS NULL
+    AND m.deleted_at IS NULL
+)
+  AND mp.deleted_at IS NULL
+ORDER BY mp.map_id ASC, mp.map_point_id ASC;
+
+1-2-27 roles
+------------
+Meaning:
+The response data.roles list must match the DB result from NODE_AUTHORITY_ROLE.
+In the current PostgreSQL DB, NODE_AUTHORITY_ROLE is represented by facility_role_permission.
+For this test, use a facility that has multiple facility_role_permission records.
+
+First find a facility that has role permission data:
+
+Simple count version:
+
+SELECT
+  ft.facility_id AS test_facility_id,
+  ft.facility_name AS test_facility_name,
+  COUNT(frp.facility_role_permission_id) AS role_count
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+JOIN permission_master pm
+  ON pm.permission_id = frp.permission_id
+WHERE ft.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+  AND pm.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.facility_name
+ORDER BY role_count DESC, ft.facility_id ASC;
+
+Use a test_facility_id where role_count is 1 or more.
+For the Excel multiple-record test, use a test_facility_id where role_count is 2 or more.
+
+Detail version:
+
+SELECT
+  ft.facility_id AS test_facility_id,
+  ft.facility_name AS test_facility_name,
+  frp.facility_role_permission_id,
+  frp.keycloak_role_id,
+  frp.keycloak_role_name,
+  frp.permission_id,
+  pm.permission_name
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+JOIN permission_master pm
+  ON pm.permission_id = frp.permission_id
+WHERE ft.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+  AND pm.deleted_at IS NULL
+ORDER BY ft.facility_id, frp.facility_role_permission_id;
+
+PostgreSQL SQL for current DB:
+SELECT
+  frp.facility_role_permission_id,
+  frp.keycloak_role_id,
+  frp.keycloak_role_name,
+  frp.permission_id AS permission_code,
+  pm.permission_name AS permission_name_reference
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+JOIN permission_master pm
+  ON pm.permission_id = frp.permission_id
+WHERE ft.facility_id = <facility_id>
+  AND ft.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+  AND pm.deleted_at IS NULL
+ORDER BY frp.facility_role_permission_id ASC;
+
+Postman:
+GET http://localhost:8081/facilities/<facility_id>
+
+Expected response part:
+{
+  "roles": [
+    {
+      "facility_role_permission_id": 1,
+      "keycloak_role_id": "viewer",
+      "keycloak_role_name": "viewer",
+      "permission_code": 20
+    }
+  ]
+}
+
+Code check:
+Current code returns facility_role_permission_id, keycloak_role_id, keycloak_role_name, and numeric permission_code.
+
+27-2 FACILITY_ROLE_PERMISSION_ID
+--------------------------------
+Expected:
+data.roles[n].facility_role_permission_id equals facility_role_permission.facility_role_permission_id.
+
+1-2-28 keycloak_role_id
+-----------------------
+Expected:
+data.roles[n].keycloak_role_id equals facility_role_permission.keycloak_role_id.
+
+1-2-29 keycloak_role_name
+-------------------------
+Expected:
+data.roles[n].keycloak_role_name equals facility_role_permission.keycloak_role_name.
+
+1-2-30 permission_code
+----------------------
+Expected:
+data.roles[n].permission_code equals facility_role_permission.permission_id.
+
+Important:
+permission_code is numeric, not the permission name string.
+Use these numbers:
+10 = facility edit
+20 = VR image view
+30 = annotation view
+40 = annotation add/update/delete
+50 = equipment view
+
+1-2-31 equipments
+-----------------
+Meaning:
+The response data.equipments list must match the DB result from EQUIPMENTS and EQUIPMENT_MASTER.
+This test should use a facility that has multiple equipment records.
+If there are 0 equipment records, data.equipments should be an empty array [].
+
+First find a facility that has equipment data:
+
+Simple count version:
+
+SELECT
+  ft.facility_id AS test_facility_id,
+  ft.facility_name AS test_facility_name,
+  COUNT(e.equipment_id) AS equipment_count
+FROM facilities_tree ft
+JOIN equipments e
+  ON ft.facility_id = e.facility_id
+JOIN equipment_masters em
+  ON e.equipment_master_id = em.equipment_master_id
+WHERE ft.deleted_at IS NULL
+  AND e.deleted_at IS NULL
+  AND em.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.facility_name
+ORDER BY equipment_count DESC, ft.facility_id ASC;
+
+Use a test_facility_id where equipment_count is 1 or more.
+For the Excel multiple-record test, use a test_facility_id where equipment_count is 2 or more.
+
+Detail version:
+
+SELECT
+  ft.facility_id AS test_facility_id,
+  ft.facility_name AS test_facility_name,
+  e.equipment_id,
+  e.equipment_master_id,
+  em.equipment_name,
+  e.yaw,
+  e.pitch
+FROM facilities_tree ft
+JOIN equipments e
+  ON ft.facility_id = e.facility_id
+JOIN equipment_masters em
+  ON e.equipment_master_id = em.equipment_master_id
+WHERE ft.deleted_at IS NULL
+  AND e.deleted_at IS NULL
+  AND em.deleted_at IS NULL
+ORDER BY ft.facility_id, e.equipment_id;
+
+PostgreSQL SQL for current DB:
+SELECT
+  e.equipment_id,
+  e.equipment_master_id,
+  em.equipment_name,
+  e.yaw,
+  e.pitch
+FROM facilities_tree ft
+JOIN equipments e
+  ON ft.facility_id = e.facility_id
+JOIN equipment_masters em
+  ON e.equipment_master_id = em.equipment_master_id
+WHERE ft.facility_id = <facility_id>
+  AND ft.deleted_at IS NULL
+  AND e.deleted_at IS NULL
+  AND em.deleted_at IS NULL
+ORDER BY e.equipment_id ASC;
+
+Note:
+The Excel says ROOM_CONTENT_ID.
+In the current PostgreSQL DB, the equivalent row id is equipments.equipment_id.
+
+Postman:
+GET http://localhost:8081/facilities/<facility_id>
+
+Expected response part:
+{
+  "equipments": [
+    {
+      "equipment_id": 1,
+      "equipment_master_id": 10,
+      "equipment_name": "設備名",
+      "yaw": 45.0,
+      "pitch": 10.0
+    }
+  ]
+}
+
+Code check:
+Current code returns equipment_id, equipment_master_id, equipment_name, yaw, and pitch.
+
+31-2 equipment_id
+-----------------
+Expected:
+data.equipments[n].equipment_id equals equipments.equipment_id.
+
+1-2-32 equipment_master_id
+--------------------------
+Expected:
+data.equipments[n].equipment_master_id equals equipments.equipment_master_id.
+
+1-2-33 equipment_name
+---------------------
+Expected:
+data.equipments[n].equipment_name equals equipment_masters.equipment_name.
+
+1-2-34 yaw
+----------
+Expected:
+data.equipments[n].yaw equals equipments.yaw.
+
+1-2-35 pitch
+------------
+Expected:
+data.equipments[n].pitch equals equipments.pitch.
+
+1-2-36 annotations
+------------------
+Meaning:
+The response data.annotations list must match the DB result from ANNOTATIONS.
+This test should use a facility that has multiple annotation records.
+If there are 0 annotation records, data.annotations should be an empty array [].
+
+First find a facility that has annotation data:
+
+Simple count version:
+
+SELECT
+  ft.facility_id AS test_facility_id,
+  ft.facility_name AS test_facility_name,
+  COUNT(a.annotation_id) AS annotation_count
+FROM facilities_tree ft
+JOIN annotations a
+  ON ft.facility_id = a.facility_id
+WHERE ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.facility_name
+ORDER BY annotation_count DESC, ft.facility_id ASC;
+
+Use a test_facility_id where annotation_count is 1 or more.
+For the Excel multiple-record test, use a test_facility_id where annotation_count is 2 or more.
+
+Detail version:
+
+SELECT
+  ft.facility_id AS test_facility_id,
+  ft.facility_name AS test_facility_name,
+  a.annotation_id,
+  a.annotation_title,
+  a.annotation_type,
+  a.created_at
+FROM facilities_tree ft
+JOIN annotations a
+  ON ft.facility_id = a.facility_id
+WHERE ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL
+ORDER BY ft.facility_id, a.annotation_type ASC, a.created_at ASC;
+
+PostgreSQL SQL for current DB:
+SELECT
+  a.annotation_id,
+  a.annotation_title,
+  a.annotation_type
+FROM facilities_tree ft
+JOIN annotations a
+  ON ft.facility_id = a.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL
+ORDER BY a.annotation_type ASC, a.created_at ASC;
+
+Note:
+The Excel says POSTED_AT.
+In the current PostgreSQL DB, the equivalent timestamp used by the API is annotations.created_at.
+
+Postman:
+GET http://localhost:8081/facilities/<facility_id>
+
+Expected response part:
+{
+  "annotations": [
+    {
+      "annotation_id": 1,
+      "title": "点検依頼",
+      "type": "10"
+    }
+  ]
+}
+
+Code check:
+Current code returns annotation_id, title, and type.
+Current code sets type from annotations.annotation_type.
+
+1-2-37 annotation_id
+--------------------
+Expected:
+data.annotations[n].annotation_id equals annotations.annotation_id.
+
+SQL:
+SELECT a.annotation_id
+FROM annotations a
+WHERE a.facility_id = <facility_id>
+  AND a.deleted_at IS NULL
+ORDER BY a.annotation_type ASC, a.created_at ASC;
+
+1-2-38 title
+------------
+Expected:
+data.annotations[n].title equals annotations.annotation_title.
+
+SQL:
+SELECT a.annotation_title
+FROM annotations a
+WHERE a.facility_id = <facility_id>
+  AND a.deleted_at IS NULL
+ORDER BY a.annotation_type ASC, a.created_at ASC;
+
+1-2-39 type
+-----------
+Expected:
+data.annotations[n].type equals annotations.annotation_type.
+
+SQL:
+SELECT a.annotation_type
+FROM annotations a
+WHERE a.facility_id = <facility_id>
+  AND a.deleted_at IS NULL
+ORDER BY a.annotation_type ASC, a.created_at ASC;
+
+1-2-40 has_vr_image
+-------------------
+Meaning:
+If the SQL count is 1 or more, data.has_vr_image must be true.
+If the SQL count is 0, data.has_vr_image must be false.
+
+First find facility IDs for this local test:
+
+Use this query to find facilities that have the related data needed for these fields.
+Pick one test_facility_id, then use it in Postman.
+
+SELECT
+  ft.facility_id AS test_facility_id,
+  ft.facility_name AS test_facility_name,
+  COUNT(DISTINCT fi.image_id) AS vr_image_count,
+  COUNT(DISTINCT emergency.annotation_id) AS emergency_annotation_count,
+  COUNT(DISTINCT normal.annotation_id) AS normal_annotation_count,
+  COUNT(DISTINCT e.equipment_id) AS equipment_count,
+  ft.created_at,
+  ft.updated_at,
+  ft.deleted_at
+FROM facilities_tree ft
+LEFT JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+ AND fi.deleted_at IS NULL
+LEFT JOIN annotations emergency
+  ON emergency.facility_id = ft.facility_id
+ AND emergency.annotation_type = '02'
+ AND emergency.deleted_at IS NULL
+LEFT JOIN annotations normal
+  ON normal.facility_id = ft.facility_id
+ AND normal.annotation_type <> '02'
+ AND normal.deleted_at IS NULL
+LEFT JOIN equipments e
+  ON e.facility_id = ft.facility_id
+ AND e.deleted_at IS NULL
+WHERE ft.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.facility_name, ft.created_at, ft.updated_at, ft.deleted_at
+ORDER BY
+  vr_image_count DESC,
+  emergency_annotation_count DESC,
+  normal_annotation_count DESC,
+  equipment_count DESC,
+  ft.facility_id ASC;
+
+How to choose the facility_id:
+- For has_vr_image = true, choose a row where vr_image_count is 1 or more.
+- For has_emergency_annotation = true, choose a row where emergency_annotation_count is 1 or more.
+- For has_normal_annotation = true, choose a row where normal_annotation_count is 1 or more.
+- For has_equipment = true, choose a row where equipment_count is 1 or more.
+- For false cases, choose a row where the related count is 0.
+- created_at, updated_at, and deleted_at can be checked with any test_facility_id.
+
+Local test:
+Use this SQL to check all boolean flags and date fields for one facility.
+Then compare the result with GET /facilities/<facility_id>.
+
+SELECT
+  ft.facility_id,
+  EXISTS (
+    SELECT 1
+    FROM facility_images fi
+    WHERE fi.facility_id = ft.facility_id
+      AND fi.deleted_at IS NULL
+  ) AS expected_has_vr_image,
+  EXISTS (
+    SELECT 1
+    FROM annotations a
+    WHERE a.facility_id = ft.facility_id
+      AND a.annotation_type = '02'
+      AND a.deleted_at IS NULL
+  ) AS expected_has_emergency_annotation,
+  EXISTS (
+    SELECT 1
+    FROM annotations a
+    WHERE a.facility_id = ft.facility_id
+      AND a.annotation_type <> '02'
+      AND a.deleted_at IS NULL
+  ) AS expected_has_normal_annotation,
+  EXISTS (
+    SELECT 1
+    FROM equipments e
+    WHERE e.facility_id = ft.facility_id
+      AND e.deleted_at IS NULL
+  ) AS expected_has_equipment,
+  ft.created_at AS expected_created_at,
+  ft.updated_at AS expected_updated_at,
+  ft.deleted_at AS expected_deleted_at
+FROM facilities_tree ft
+WHERE ft.facility_id = <facility_id>;
+
+Postman:
+GET http://localhost:8081/facilities/<facility_id>
+
+Expected comparison:
+- expected_has_vr_image equals data.has_vr_image
+- expected_has_emergency_annotation equals data.has_emergency_annotation
+- expected_has_normal_annotation equals data.has_normal_annotation
+- expected_has_equipment equals data.has_equipment
+- expected_created_at equals data.created_at after API date formatting
+- expected_updated_at equals data.updated_at after API date formatting
+- expected_deleted_at equals data.deleted_at after API date formatting
+
+SQL:
+SELECT COUNT(*) AS vr_image_count
+FROM facilities_tree ft
+JOIN facility_images fi
+  ON ft.facility_id = fi.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND ft.deleted_at IS NULL
+  AND fi.deleted_at IS NULL;
+
+Postman:
+GET http://localhost:8081/facilities/<facility_id>
+
+Expected:
+- vr_image_count >= 1: "has_vr_image": true
+- vr_image_count = 0: "has_vr_image": false
+
+Code check:
+Current code uses facility_images count for this flag.
+
+1-2-41 has_emergency_annotation
+-------------------------------
+Meaning:
+If the SQL count is 1 or more, data.has_emergency_annotation must be true.
+If the SQL count is 0, data.has_emergency_annotation must be false.
+
+Important:
+The Excel says ANNOTATION_TYPE = XX.
+In the current code, emergency annotation is checked as annotation_type = '02'.
+
+SQL:
+SELECT COUNT(*) AS emergency_annotation_count
+FROM facilities_tree ft
+JOIN annotations a
+  ON ft.facility_id = a.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND a.annotation_type = '02'
+  AND ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL;
+
+Expected:
+- emergency_annotation_count >= 1: "has_emergency_annotation": true
+- emergency_annotation_count = 0: "has_emergency_annotation": false
+
+Code check:
+Current code uses annotations where annotation_type = '02'.
+
+1-2-42 has_normal_annotation
+----------------------------
+Meaning:
+If the SQL count is 1 or more, data.has_normal_annotation must be true.
+If the SQL count is 0, data.has_normal_annotation must be false.
+
+Important:
+The Excel says ANNOTATION_TYPE <> XX.
+In the current code, normal annotation means annotation_type <> '02'.
+
+SQL:
+SELECT COUNT(*) AS normal_annotation_count
+FROM facilities_tree ft
+JOIN annotations a
+  ON ft.facility_id = a.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND a.annotation_type <> '02'
+  AND ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL;
+
+Expected:
+- normal_annotation_count >= 1: "has_normal_annotation": true
+- normal_annotation_count = 0: "has_normal_annotation": false
+
+Code check:
+Current code uses annotations where annotation_type <> '02'.
+
+1-2-43 has_equipment
+--------------------
+Meaning:
+If the SQL count is 1 or more, data.has_equipment must be true.
+If the SQL count is 0, data.has_equipment must be false.
+
+SQL:
+SELECT COUNT(*) AS equipment_count
+FROM facilities_tree ft
+JOIN equipments e
+  ON ft.facility_id = e.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND ft.deleted_at IS NULL
+  AND e.deleted_at IS NULL;
+
+Expected:
+- equipment_count >= 1: "has_equipment": true
+- equipment_count = 0: "has_equipment": false
+
+Code check:
+Current code uses equipments count for this flag.
+
+1-2-44 created_at
+-----------------
+Meaning:
+data.created_at must be the created timestamp of the facility.
+
+SQL:
+SELECT created_at
+FROM facilities_tree
+WHERE facility_id = <facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+data.created_at equals facilities_tree.created_at formatted by the API.
+
+1-2-45 updated_at
+-----------------
+Meaning:
+data.updated_at must be the updated timestamp of the facility.
+
+SQL:
+SELECT updated_at
+FROM facilities_tree
+WHERE facility_id = <facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+data.updated_at equals facilities_tree.updated_at formatted by the API.
+
+1-2-46 deleted_at
+-----------------
+Meaning:
+data.deleted_at must be the deleted timestamp of the facility.
+For normal active facilities, this is null.
+
+SQL:
+SELECT deleted_at
+FROM facilities_tree
+WHERE facility_id = <facility_id>;
+
+Expected:
+For active data:
+"deleted_at": null
+
+Code check:
+Current detail response returns created_at, updated_at, and deleted_at from facilities_tree.
+
+4 Detail GET /facilities/{facilityid} (USER01)
+=============================================
+
+Goal:
+Non-SYS_ADMIN users can get facility detail only when they have a facility view permission row in DB.
+
+Required Keycloak role:
+- The login user must have the client role used in DB, for example R_USER01.
+- Check it first in Postman:
+  GET http://localhost:8081/api/keycloak/me
+- Expected:
+  data.roles contains "R_USER01".
+
+Required DB permission:
+- The target facility must have permission_id = 20 for the same Keycloak role.
+- permission_id = 20 means VR image / facility view permission in the current test data.
+
+DB check:
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE facility_id = <facility_id>
+  AND permission_id = 20
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+- permission_count >= 1: USER01 can get facility detail.
+- permission_count = 0: API returns permission_denied.
+
+Postman test:
+GET http://localhost:8081/facilities/<facility_id>
+Authorization: Bearer <USER01 access_token>
+
+Expected success response when DB count is 1 or more:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "facility_id": <facility_id>
+  }
+}
+
+Important code behavior:
+- Spring Security only requires authentication for GET /facilities/{facilityId}.
+- The service checks facility_role_permission using permission_id = 20 and the roles from the access token.
+- SYS_ADMIN bypasses this DB permission check.
+
+4-2-11 images for USER01
+------------------------
+Meaning:
+For USER01, data.images must match 1-2-11 only when the user has the VR image view permission for the target facility.
+If the user does not have that permission, data.images must be an empty array.
+
+First find a facility_id that has both image data and USER01 VR image view permission:
+
+SELECT
+  ft.facility_id,
+  ft.facility_name,
+  fi.image_id,
+  fi.file_id,
+  fi.image_name,
+  frp.permission_id,
+  frp.keycloak_role_id
+FROM facilities_tree ft
+JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE frp.permission_id = 20
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND ft.deleted_at IS NULL
+  AND fi.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+ORDER BY ft.facility_id, fi.image_id;
+
+Use one facility_id from this result.
+
+Permission count check:
+
+SELECT COUNT(*) AS image_permission_count
+FROM facility_role_permission frp
+WHERE frp.facility_id = <facility_id>
+  AND frp.permission_id = 20
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND frp.deleted_at IS NULL;
+
+Expected:
+- image_permission_count >= 1: response data.images contains the facility_images row.
+- image_permission_count = 0: response data.images is [].
+
+Image DB data check:
+
+SELECT
+  fi.image_id,
+  fi.file_id,
+  fi.image_name,
+  fi.shooting_height,
+  fi.ceiling_height
+FROM facilities_tree ft
+JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND ft.deleted_at IS NULL
+  AND fi.deleted_at IS NULL
+ORDER BY fi.image_id ASC;
+
+Postman:
+GET http://localhost:8081/facilities/<facility_id>
+Authorization: Bearer <USER01 access_token>
+
+Expected response part when permission count is 1 or more:
+
+{
+  "images": [
+    {
+      "image_id": 6001,
+      "file_id": 5001,
+      "image_name": "1号棟VR",
+      "shooting_height": 1500,
+      "ceiling_height": 3000
+    }
+  ]
+}
+
+Expected response part when permission count is 0:
+
+{
+  "images": []
+}
+
+4-2-40 to 4-2-43 boolean flags for USER01
+------------------------------------------
+Meaning:
+For USER01, these boolean fields must be true only when both conditions are true:
+1. The related DB data exists for the facility.
+2. USER01 has the required permission row in facility_role_permission.
+
+Permission IDs used by the current DB:
+- 20: VR image view permission
+- 30: annotation view permission
+- 40: annotation add/edit/delete permission
+- 50: equipment view permission
+
+First find facility IDs that USER01 can use for these checks:
+
+SELECT DISTINCT
+  frp.facility_id,
+  ft.facility_name,
+  frp.permission_id,
+  frp.keycloak_role_id
+FROM facility_role_permission frp
+JOIN facilities_tree ft
+  ON ft.facility_id = frp.facility_id
+WHERE frp.keycloak_role_id IN ('R_USER01')
+  AND frp.permission_id IN (20, 30, 40, 50)
+  AND frp.deleted_at IS NULL
+  AND ft.deleted_at IS NULL
+ORDER BY frp.facility_id, frp.permission_id;
+
+Use a facility_id from this result in Postman:
+
+GET http://localhost:8081/facilities/<facility_id>
+Authorization: Bearer <USER01 access_token>
+
+4-2-40 has_vr_image
+-------------------
+Meaning:
+data.has_vr_image is true only when the facility has VR image data and USER01 has permission_id = 20 for that facility.
+
+Find a facility that has VR image data and USER01 permission:
+
+SELECT
+  ft.facility_id,
+  ft.facility_name,
+  COUNT(fi.image_id) AS vr_image_count,
+  COUNT(frp.facility_role_permission_id) AS permission_count
+FROM facilities_tree ft
+JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE frp.permission_id = 20
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND ft.deleted_at IS NULL
+  AND fi.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.facility_name
+ORDER BY ft.facility_id;
+
+Check one facility:
+
+SELECT COUNT(*) AS expected_count
+FROM facilities_tree ft
+JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND frp.permission_id = 20
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND ft.deleted_at IS NULL
+  AND fi.deleted_at IS NULL
+  AND frp.deleted_at IS NULL;
+
+Expected:
+- expected_count >= 1: data.has_vr_image is true.
+- expected_count = 0: data.has_vr_image is false.
+
+4-2-41 has_emergency_annotation
+-------------------------------
+Meaning:
+data.has_emergency_annotation is true only when the facility has emergency annotation data and USER01 has permission_id 30 or 40.
+The current Excel defines emergency annotation as annotation_type = '10'.
+
+Find a facility that has emergency annotation data and USER01 permission:
+
+SELECT
+  ft.facility_id,
+  ft.facility_name,
+  COUNT(a.annotation_id) AS emergency_annotation_count,
+  COUNT(frp.facility_role_permission_id) AS permission_count
+FROM facilities_tree ft
+JOIN annotations a
+  ON a.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE a.annotation_type = '10'
+  AND frp.permission_id IN (30, 40)
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.facility_name
+ORDER BY ft.facility_id;
+
+Check one facility:
+
+SELECT COUNT(*) AS expected_count
+FROM facilities_tree ft
+JOIN annotations a
+  ON a.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND a.annotation_type = '10'
+  AND frp.permission_id IN (30, 40)
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL
+  AND frp.deleted_at IS NULL;
+
+Expected:
+- expected_count >= 1: data.has_emergency_annotation is true.
+- expected_count = 0: data.has_emergency_annotation is false.
+
+4-2-42 has_normal_annotation
+----------------------------
+Meaning:
+data.has_normal_annotation is true only when the facility has non-emergency annotation data and USER01 has permission_id 30 or 40.
+The current Excel defines normal annotation as annotation_type <> '10'.
+
+Find a facility that has normal annotation data and USER01 permission:
+
+SELECT
+  ft.facility_id,
+  ft.facility_name,
+  COUNT(a.annotation_id) AS normal_annotation_count,
+  COUNT(frp.facility_role_permission_id) AS permission_count
+FROM facilities_tree ft
+JOIN annotations a
+  ON a.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE a.annotation_type <> '10'
+  AND frp.permission_id IN (30, 40)
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.facility_name
+ORDER BY ft.facility_id;
+
+Check one facility:
+
+SELECT COUNT(*) AS expected_count
+FROM facilities_tree ft
+JOIN annotations a
+  ON a.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND a.annotation_type <> '10'
+  AND frp.permission_id IN (30, 40)
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL
+  AND frp.deleted_at IS NULL;
+
+Expected:
+- expected_count >= 1: data.has_normal_annotation is true.
+- expected_count = 0: data.has_normal_annotation is false.
+
+4-2-43 has_equipment
+--------------------
+Meaning:
+data.has_equipment is true only when the facility has equipment data and USER01 has permission_id = 50.
+
+Find a facility that has equipment data and USER01 permission:
+
+SELECT
+  ft.facility_id,
+  ft.facility_name,
+  COUNT(e.equipment_id) AS equipment_count,
+  COUNT(frp.facility_role_permission_id) AS permission_count
+FROM facilities_tree ft
+JOIN equipments e
+  ON e.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE frp.permission_id = 50
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND ft.deleted_at IS NULL
+  AND e.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.facility_name
+ORDER BY ft.facility_id;
+
+Check one facility:
+
+SELECT COUNT(*) AS expected_count
+FROM facilities_tree ft
+JOIN equipments e
+  ON e.facility_id = ft.facility_id
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND frp.permission_id = 50
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND ft.deleted_at IS NULL
+  AND e.deleted_at IS NULL
+  AND frp.deleted_at IS NULL;
+
+Expected:
+- expected_count >= 1: data.has_equipment is true.
+- expected_count = 0: data.has_equipment is false.
+
+6 Detail GET for a different facility as USER01, no data case
+==============================================================
+
+6-1-1 Data count
+----------------
+Meaning:
+This test uses a different facility_id from the previous USER01 detail test.
+If USER01 has a facility role for that facility, the API returns 1 data object.
+If USER01 does not have a facility role for that facility, the API must return a normal response with 0 data.
+
+Current API wrapper for 0 data:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": null
+}
+
+Step 1: confirm USER01 role from /api/keycloak/me.
+
+Postman:
+GET http://localhost:8081/api/keycloak/me
+
+Expected role example:
+roles contains "R_USER01".
+
+Step 2: find a facility_id that does NOT have USER01 facility role.
+Replace <previous_facility_id> with the facility used in the previous USER01 test.
+
+SELECT
+  ft.facility_id,
+  ft.facility_name
+FROM facilities_tree ft
+WHERE ft.deleted_at IS NULL
+  AND ft.facility_id <> <previous_facility_id>
+  AND NOT EXISTS (
+    SELECT 1
+    FROM facility_role_permission frp
+    WHERE frp.facility_id = ft.facility_id
+      AND frp.keycloak_role_id IN ('R_USER01')
+      AND frp.deleted_at IS NULL
+  )
+ORDER BY ft.facility_id;
+
+Use one facility_id from this result.
+
+Step 3: prove DB permission count is 0.
+
+SELECT COUNT(*) AS permission_count
+FROM facility_role_permission
+WHERE facility_id = <facility_id>
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+permission_count = 0.
+
+Step 4: test in Postman with USER01 token.
+
+GET http://localhost:8081/facilities/<facility_id>
+
+Header:
+Authorization: Bearer <USER01 access_token>
+
+Expected:
+- HTTP 200
+- success = true
+- error_code = null
+- message = ok
+- data = null
+
+Note:
+In the Excel SQL, NODE_AUTHORITY_ROLE is represented in this PostgreSQL schema by facility_role_permission.

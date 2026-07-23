@@ -12,11 +12,11 @@ Keycloak URLs
 
 Keycloak admin console:
 
-  http://172.21.33.114:8080
+  http://localhost:8080
 
 Keycloak API / token endpoint base:
 
-  http://172.21.33.114:9443
+  http://localhost:8080
 
 Realm:
 
@@ -30,19 +30,23 @@ Application client:
 Spring Boot application.properties
 ----------------------------------
 
-The code should use the Keycloak API endpoint, not the console URL.
+The code should use local Keycloak when testing on this computer.
 
 Required settings:
 
-  keycloak.base-url=http://172.21.33.114:9443
+  keycloak.base-url=http://localhost:8080
   keycloak.realm=pygmalion_viewer
   keycloak.app-client-id=TestClient
-  spring.security.oauth2.resourceserver.jwt.issuer-uri=http://172.21.33.114:9443/realms/pygmalion_viewer
+  spring.security.oauth2.resourceserver.jwt.issuer-uri=http://localhost:8080/realms/pygmalion_viewer
 
 Important:
 
-  http://172.21.33.114:8080 is for opening the Keycloak admin console in a browser.
-  http://172.21.33.114:9443 is for token/API calls.
+  For local testing, both the Keycloak admin console and token/API calls use:
+
+  http://localhost:8080
+
+  If you switch to the remote verification server later, change both
+  keycloak.base-url and issuer-uri to the same remote Keycloak base URL.
 
 
 Postman: get access token
@@ -50,7 +54,7 @@ Postman: get access token
 
 Request:
 
-  POST http://172.21.33.114:9443/realms/pygmalion_viewer/protocol/openid-connect/token
+  POST http://localhost:8080/realms/pygmalion_viewer/protocol/openid-connect/token
 
 Body:
 
@@ -99,19 +103,19 @@ Expected success response example:
 }
 
 
-How to confirm the app is not using local Keycloak
---------------------------------------------------
+How to confirm the app is using local Keycloak
+----------------------------------------------
 
 Check application.properties:
 
-  keycloak.base-url must not be localhost.
-  spring.security.oauth2.resourceserver.jwt.issuer-uri must not be localhost.
+  keycloak.base-url must be localhost.
+  spring.security.oauth2.resourceserver.jwt.issuer-uri must be localhost.
 
 Then restart Spring Boot.
 
 After restart, get a new access token from:
 
-  http://172.21.33.114:9443/realms/pygmalion_viewer/protocol/openid-connect/token
+  http://localhost:8080/realms/pygmalion_viewer/protocol/openid-connect/token
 
 Then call:
 

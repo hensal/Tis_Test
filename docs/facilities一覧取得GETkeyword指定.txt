@@ -1,0 +1,518 @@
+facilities一覧取得GETkeyword指定
+=================================
+
+1 List GET keyword search, SYS_ADMIN
+====================================
+
+Endpoint:
+GET /facilities?keyword=<keyword>
+
+User:
+SYS_ADMIN access token
+
+1-2 Response Parameters
+-----------------------
+
+1-2-1 Data count
+----------------
+Meaning:
+All active facilities whose facility_name contains the keyword must be listed.
+
+Step 1: choose a keyword that exists in facility_name.
+
+Find example keywords:
+
+SELECT facility_id, facility_name
+FROM facilities_tree
+WHERE deleted_at IS NULL
+ORDER BY facility_id;
+
+Step 2: check expected rows in DB.
+
+SELECT *
+FROM facilities_tree
+WHERE facility_name LIKE '%<keyword>%'
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+Step 3: test in Postman.
+
+GET http://localhost:8081/facilities?keyword=<keyword>
+
+Headers:
+Authorization: Bearer <SYS_ADMIN access_token>
+
+Expected:
+- success = true
+- data is an array
+- data count matches the SQL result count
+- rows are ordered by sort_order ASC, facility_id ASC
+
+1-2-2 facility_id
+-----------------
+Check:
+data[].facility_id must match facilities_tree.facility_id.
+
+SQL:
+
+SELECT facility_id
+FROM facilities_tree
+WHERE facility_name LIKE '%<keyword>%'
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+1-2-3 parent_id
+---------------
+Check:
+data[].parent_id must match facilities_tree.parent_id.
+
+SQL:
+
+SELECT facility_id, parent_id
+FROM facilities_tree
+WHERE facility_name LIKE '%<keyword>%'
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+1-2-4 facility_name
+-------------------
+Check:
+data[].facility_name must match facilities_tree.facility_name.
+
+SQL:
+
+SELECT facility_id, facility_name
+FROM facilities_tree
+WHERE facility_name LIKE '%<keyword>%'
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+1-2-5 publish_mode
+------------------
+Check:
+data[].publish_mode must match facilities_tree.public_flag.
+
+SQL:
+
+SELECT facility_id, public_flag
+FROM facilities_tree
+WHERE facility_name LIKE '%<keyword>%'
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+1-2-6 is_outdoor
+----------------
+Check:
+data[].is_outdoor must match facilities_tree.outer_flag.
+
+SQL:
+
+SELECT facility_id, outer_flag
+FROM facilities_tree
+WHERE facility_name LIKE '%<keyword>%'
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+1-2-7 has_vr_image
+------------------
+Meaning:
+For each facility in the response, has_vr_image is true when at least one active facility_images row exists.
+
+SQL for one facility:
+
+SELECT COUNT(*) AS vr_image_count
+FROM facilities_tree ft
+JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND ft.deleted_at IS NULL
+  AND fi.deleted_at IS NULL;
+
+Expected:
+- count >= 1: has_vr_image = true
+- count = 0: has_vr_image = false
+
+1-2-8 has_emergency_annotation
+------------------------------
+Meaning:
+For each facility in the response, has_emergency_annotation is true when at least one active emergency annotation exists.
+Current code treats emergency annotation_type as '10'.
+
+SQL for one facility:
+
+SELECT COUNT(*) AS emergency_annotation_count
+FROM facilities_tree ft
+JOIN annotations a
+  ON a.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND a.annotation_type = '10'
+  AND ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL;
+
+Expected:
+- count >= 1: has_emergency_annotation = true
+- count = 0: has_emergency_annotation = false
+
+1-2-9 has_normal_annotation
+---------------------------
+Meaning:
+For each facility in the response, has_normal_annotation is true when at least one active non-emergency annotation exists.
+Current code treats normal annotation as annotation_type <> '10'.
+
+SQL for one facility:
+
+SELECT COUNT(*) AS normal_annotation_count
+FROM facilities_tree ft
+JOIN annotations a
+  ON a.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND a.annotation_type <> '10'
+  AND ft.deleted_at IS NULL
+  AND a.deleted_at IS NULL;
+
+Expected:
+- count >= 1: has_normal_annotation = true
+- count = 0: has_normal_annotation = false
+
+1-2-10 has_equipment
+--------------------
+Meaning:
+For each facility in the response, has_equipment is true when at least one active equipments row exists.
+
+SQL for one facility:
+
+SELECT COUNT(*) AS equipment_count
+FROM facilities_tree ft
+JOIN equipments e
+  ON e.facility_id = ft.facility_id
+WHERE ft.facility_id = <facility_id>
+  AND ft.deleted_at IS NULL
+  AND e.deleted_at IS NULL;
+
+Expected:
+- count >= 1: has_equipment = true
+- count = 0: has_equipment = false
+
+1-2-11 created_at
+-----------------
+Check:
+data[].created_at must match facilities_tree.created_at.
+
+SQL:
+
+SELECT facility_id, created_at
+FROM facilities_tree
+WHERE facility_name LIKE '%<keyword>%'
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+1-2-12 updated_at
+-----------------
+Check:
+data[].updated_at must match facilities_tree.updated_at.
+
+SQL:
+
+SELECT facility_id, updated_at
+FROM facilities_tree
+WHERE facility_name LIKE '%<keyword>%'
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+1-2-13 deleted_at
+-----------------
+Check:
+data[].deleted_at must match facilities_tree.deleted_at.
+Because this API only returns active rows, deleted_at should normally be null.
+
+SQL:
+
+SELECT facility_id, deleted_at
+FROM facilities_tree
+WHERE facility_name LIKE '%<keyword>%'
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+4 List GET keyword search, USER01
+=================================
+
+Endpoint:
+GET /facilities?keyword=<keyword>
+
+User:
+USER01 access token
+
+4-2 Response Parameters
+-----------------------
+
+4-2-1 Data count
+----------------
+Meaning:
+For USER01, the API must return only active facilities that match the keyword and also have a facility role permission for one of USER01's roles.
+
+In the Excel wording, NODE_AUTHORITY_ROLE means the same permission table used by this code:
+facility_role_permission.
+
+Step 1: get USER01 roles.
+
+Postman:
+GET http://localhost:8081/api/keycloak/me
+
+Headers:
+Authorization: Bearer <USER01 access_token>
+
+Use the roles returned in data.roles.
+
+Example:
+USER01 role = R_USER01
+
+Step 2: choose a keyword that should return data for USER01.
+
+Find candidate facilities and roles:
+
+SELECT
+  ft.facility_id,
+  ft.facility_name,
+  ft.parent_id,
+  frp.keycloak_role_id
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE ft.deleted_at IS NULL
+  AND frp.deleted_at IS NULL
+ORDER BY ft.sort_order ASC, ft.facility_id ASC;
+
+Step 3: check expected rows in DB.
+
+Replace <keyword> and the role list with the roles from /api/keycloak/me.
+
+SELECT DISTINCT ft.*
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+WHERE ft.facility_name LIKE '%<keyword>%'
+  AND ft.deleted_at IS NULL
+  AND frp.keycloak_role_id IN ('R_USER01')
+  AND frp.deleted_at IS NULL
+ORDER BY ft.sort_order ASC, ft.facility_id ASC;
+
+Expected:
+- If the SQL returns N rows, the API data array must also contain N rows.
+- If the SQL returns 0 rows, the API must return data: [].
+
+Step 4: test in Postman.
+
+GET http://localhost:8081/facilities?keyword=<keyword>
+
+Headers:
+Authorization: Bearer <USER01 access_token>
+
+Expected:
+- success = true
+- data is an array
+- data count matches the SQL result count
+- rows are ordered by sort_order ASC, facility_id ASC
+
+4-2-2 facility_id
+-----------------
+Check:
+data[].facility_id must match facilities_tree.facility_id from the SQL in 4-2-1.
+
+4-2-3 parent_id
+---------------
+Check:
+data[].parent_id must match facilities_tree.parent_id from the SQL in 4-2-1.
+
+4-2-4 facility_name
+-------------------
+Check:
+data[].facility_name must match facilities_tree.facility_name from the SQL in 4-2-1.
+
+4-2-5 publish_mode
+------------------
+Check:
+data[].publish_mode must match facilities_tree.public_flag from the SQL in 4-2-1.
+
+4-2-6 is_outdoor
+----------------
+Check:
+data[].is_outdoor must match facilities_tree.outer_flag from the SQL in 4-2-1.
+
+4-2-7 has_vr_image
+------------------
+Check:
+Same as 1-2-7 for each facility returned by 4-2-1.
+
+4-2-8 has_emergency_annotation
+------------------------------
+Check:
+Same as 1-2-8 for each facility returned by 4-2-1.
+
+4-2-9 has_normal_annotation
+---------------------------
+Check:
+Same as 1-2-9 for each facility returned by 4-2-1.
+
+4-2-10 has_equipment
+--------------------
+Check:
+Same as 1-2-10 for each facility returned by 4-2-1.
+
+4-2-11 created_at
+-----------------
+Check:
+data[].created_at must match facilities_tree.created_at from the SQL in 4-2-1.
+
+4-2-12 updated_at
+-----------------
+Check:
+data[].updated_at must match facilities_tree.updated_at from the SQL in 4-2-1.
+
+4-2-13 deleted_at
+-----------------
+Check:
+data[].deleted_at must match facilities_tree.deleted_at from the SQL in 4-2-1.
+Because this API only returns active rows, deleted_at should normally be null.
+
+3 List GET keyword search, SYS_ADMIN, no matching data
+======================================================
+
+Endpoint:
+GET /facilities?keyword=<keyword>
+
+User:
+SYS_ADMIN access token
+
+3-1 Response Parameters
+-----------------------
+
+3-3-1 Data count
+----------------
+Meaning:
+Use a keyword that does not match any active facility_name.
+The API must return a normal response with 0 records.
+
+Because this is a list API, 0 records should be returned as an empty array:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": []
+}
+
+Step 1: choose a no-match keyword.
+
+Example keyword:
+
+NO_MATCH_KEYWORD_999999
+
+Step 2: confirm in DB that the keyword returns 0 records.
+
+SELECT COUNT(*) AS facility_count
+FROM facilities_tree
+WHERE deleted_at IS NULL
+  AND facility_name LIKE '%NO_MATCH_KEYWORD_999999%';
+
+Expected:
+facility_count = 0
+
+Step 3: test in Postman.
+
+Method:
+GET
+
+URL:
+http://localhost:8081/facilities?keyword=NO_MATCH_KEYWORD_999999
+
+Headers:
+Authorization: Bearer <SYS_ADMIN access_token>
+
+Expected response:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": []
+}
+
+Check:
+- HTTP status is 200.
+- success is true.
+- error_code is null.
+- data is an empty array.
+
+6 List GET keyword search, USER01, no matching data
+===================================================
+
+Endpoint:
+GET /facilities?keyword=<keyword>
+
+User:
+USER01 access token
+
+6-1 Response Parameters
+-----------------------
+
+6-1-1 Data count
+----------------
+Meaning:
+Use a keyword that does not match any active facility_name.
+The API must return a normal response with 0 records.
+
+Because this is a list API, 0 records should be returned as an empty array:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": []
+}
+
+Step 1: choose a no-match keyword.
+
+Example keyword:
+
+NO_MATCH_KEYWORD_999999
+
+Step 2: confirm in DB that the keyword returns 0 records.
+
+SELECT COUNT(*) AS facility_count
+FROM facilities_tree
+WHERE deleted_at IS NULL
+  AND facility_name LIKE '%NO_MATCH_KEYWORD_999999%';
+
+Expected:
+facility_count = 0
+
+Step 3: test in Postman.
+
+Method:
+GET
+
+URL:
+http://localhost:8081/facilities?keyword=NO_MATCH_KEYWORD_999999
+
+Headers:
+Authorization: Bearer <USER01 access_token>
+
+Expected response:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": []
+}
+
+Check:
+- HTTP status is 200.
+- success is true.
+- error_code is null.
+- data is an empty array.
+
+Note:
+This is different from GET /facilities/{facilityId}.
+Detail API 0 records can be data: null.
+List API 0 records should be data: [].

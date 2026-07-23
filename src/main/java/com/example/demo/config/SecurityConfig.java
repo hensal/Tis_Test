@@ -108,7 +108,7 @@ public class SecurityConfig {
 
                         .requestMatchers(
                                 "/facilities/**"
-                        ).hasAuthority("ROLE_SYS_ADMIN")
+                        ).authenticated()
 
                         .requestMatchers(
                                 "/api/keycloak/client-roles"

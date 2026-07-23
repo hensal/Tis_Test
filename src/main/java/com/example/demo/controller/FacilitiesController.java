@@ -36,7 +36,8 @@ public class FacilitiesController {
     @GetMapping
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> listFacilities(
             @RequestParam(value = "parentId", required = false) String parentId,
-            @RequestParam(value = "keyword", required = false) String keyword
+            @RequestParam(value = "keyword", required = false) String keyword,
+            Authentication authentication
     ) {
         if (parentId != null && keyword != null) {
             throw invalidRequest();
@@ -45,16 +46,24 @@ public class FacilitiesController {
         validateKeyword(keyword);
 
         return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.listFacilities(parseOptionalFacilityId(parentId), keyword))
+                ApiResponse.ok(facilitiesService.listFacilities(
+                        parseOptionalFacilityId(parentId),
+                        keyword,
+                        extractRoleNames(authentication)
+                ))
         );
     }
 
     @GetMapping("/{facilityId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getFacility(
-            @PathVariable String facilityId
+            @PathVariable String facilityId,
+            Authentication authentication
     ) {
         return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.getFacility(parseFacilityId(facilityId)))
+                ApiResponse.ok(facilitiesService.getFacility(
+                        parseFacilityId(facilityId),
+                        extractRoleNames(authentication)
+                ))
         );
     }
 

@@ -31,6 +31,11 @@ public class FacilitiesService {
     private static final DateTimeFormatter DATE_TIME_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss");
     private static final long FACILITY_EDIT_PERMISSION_ID = 10L;
+    private static final long FACILITY_VIEW_PERMISSION_ID = 20L;
+    private static final long ANNOTATION_VIEW_PERMISSION_ID = 30L;
+    private static final long ANNOTATION_EDIT_PERMISSION_ID = 40L;
+    private static final long EQUIPMENT_VIEW_PERMISSION_ID = 50L;
+    private static final String EMERGENCY_ANNOTATION_TYPE = "10";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -57,36 +62,62 @@ public class FacilitiesService {
 
     public List<Map<String, Object>> listFacilities(
             Long parentId,
-            String keyword
+            String keyword,
+            Set<String> userRoles
     ) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT *
-                  FROM facilities_tree
-                 WHERE deleted_at IS NULL
-                """);
-
-        List<Object> params;
-
-        if (parentId != null) {
-            sql.append(" AND parent_id = ?");
-            params = List.of(parentId);
-        } else if (keyword != null && !keyword.isBlank()) {
-            sql.append(" AND facility_name LIKE ?");
-            params = List.of("%" + keyword + "%");
-        } else {
-            params = Collections.emptyList();
+        boolean filterByRole = userRoles == null || !userRoles.contains("SYS_ADMIN");
+        if (filterByRole && (userRoles == null || userRoles.isEmpty())) {
+            return List.of();
         }
 
-        sql.append(" ORDER BY sort_order ASC, facility_id ASC");
+        StringBuilder sql = new StringBuilder("""
+                SELECT DISTINCT ft.*
+                  FROM facilities_tree ft
+                """);
+
+        List<Object> params = new java.util.ArrayList<>();
+
+        if (filterByRole) {
+            String rolePlaceholders = userRoles.stream()
+                    .map(role -> "?")
+                    .collect(Collectors.joining(", "));
+            sql.append("""
+                    JOIN facility_role_permission frp
+                      ON frp.facility_id = ft.facility_id
+                     AND frp.deleted_at IS NULL
+                     AND frp.keycloak_role_id IN (%s)
+                    """.formatted(rolePlaceholders));
+            params.addAll(userRoles);
+        }
+
+        sql.append(" WHERE ft.deleted_at IS NULL");
+
+        if (parentId != null) {
+            sql.append(" AND ft.parent_id = ?");
+            params.add(parentId);
+        } else if (keyword != null && !keyword.isBlank()) {
+            sql.append(" AND ft.facility_name LIKE ?");
+            params.add("%" + keyword + "%");
+        }
+
+        sql.append(" ORDER BY ft.sort_order ASC, ft.facility_id ASC");
 
         return jdbcTemplate.query(sql.toString(), facilityRowMapper, params.toArray())
                 .stream()
-                .map(this::toListResponse)
+                .map(facility -> toListResponse(facility, userRoles))
                 .toList();
     }
 
-    public Map<String, Object> getFacility(Long facilityId) {
-        return toDetailResponse(getActiveFacility(facilityId));
+    public Map<String, Object> getFacility(
+            Long facilityId,
+            Set<String> userRoles
+    ) {
+        FacilityRecord facility = getActiveFacility(facilityId);
+        if (!hasFacilityRole(facilityId, userRoles)) {
+            return null;
+        }
+
+        return toDetailResponse(facility, userRoles);
     }
 
     public Map<String, Object> getViewHtml(Long facilityId) {
@@ -359,17 +390,24 @@ public class FacilitiesService {
         return data;
     }
 
-    private Map<String, Object> toListResponse(FacilityRecord facility) {
+    private Map<String, Object> toListResponse(
+            FacilityRecord facility,
+            Set<String> userRoles
+    ) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("facility_id", facility.facilityId);
         data.put("parent_id", facility.parentId);
         data.put("facility_name", facility.facilityName);
         data.put("publish_mode", facility.publishMode);
         data.put("is_outdoor", facility.isOutdoor);
-        data.put("has_vr_image", hasVrImage(facility.facilityId));
-        data.put("has_emergency_annotation", hasAnnotation(facility.facilityId, "02"));
-        data.put("has_normal_annotation", hasNormalAnnotation(facility.facilityId));
-        data.put("has_equipment", hasEquipment(facility.facilityId));
+        data.put("has_vr_image", hasVrImage(facility.facilityId, userRoles));
+        data.put("has_emergency_annotation", hasAnnotation(
+                facility.facilityId,
+                EMERGENCY_ANNOTATION_TYPE,
+                userRoles
+        ));
+        data.put("has_normal_annotation", hasNormalAnnotation(facility.facilityId, userRoles));
+        data.put("has_equipment", hasEquipment(facility.facilityId, userRoles));
         data.put("created_at", format(facility.createdAt));
         data.put("updated_at", format(facility.updatedAt));
         data.put("deleted_at", format(facility.deletedAt));
@@ -378,6 +416,13 @@ public class FacilitiesService {
     }
 
     private Map<String, Object> toDetailResponse(FacilityRecord facility) {
+        return toDetailResponse(facility, Set.of("SYS_ADMIN"));
+    }
+
+    private Map<String, Object> toDetailResponse(
+            FacilityRecord facility,
+            Set<String> userRoles
+    ) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("facility_id", facility.facilityId);
         data.put("parent_id", facility.parentId);
@@ -388,21 +433,34 @@ public class FacilitiesService {
         data.put("is_outdoor", facility.isOutdoor);
         data.put("detail", facility.detail);
         data.put("has_permission", facility.hasPermission);
-        data.put("images", getImages(facility.facilityId));
+        data.put("images", canViewImages(facility.facilityId, userRoles)
+                ? getImages(facility.facilityId)
+                : List.of());
         data.put("maps", getMaps(facility.facilityId));
         data.put("map_points", getMapPoints(facility.facilityId));
         data.put("roles", getRoles(facility.facilityId));
         data.put("equipments", getEquipments(facility.facilityId));
         data.put("annotations", getAnnotations(facility.facilityId));
-        data.put("has_vr_image", hasVrImage(facility.facilityId));
-        data.put("has_emergency_annotation", hasAnnotation(facility.facilityId, "02"));
-        data.put("has_normal_annotation", hasNormalAnnotation(facility.facilityId));
-        data.put("has_equipment", hasEquipment(facility.facilityId));
+        data.put("has_vr_image", hasVrImage(facility.facilityId, userRoles));
+        data.put("has_emergency_annotation", hasAnnotation(
+                facility.facilityId,
+                EMERGENCY_ANNOTATION_TYPE,
+                userRoles
+        ));
+        data.put("has_normal_annotation", hasNormalAnnotation(facility.facilityId, userRoles));
+        data.put("has_equipment", hasEquipment(facility.facilityId, userRoles));
         data.put("created_at", format(facility.createdAt));
         data.put("updated_at", format(facility.updatedAt));
         data.put("deleted_at", format(facility.deletedAt));
 
         return data;
+    }
+
+    private boolean canViewImages(
+            Long facilityId,
+            Set<String> userRoles
+    ) {
+        return hasFacilityPermission(facilityId, userRoles, FACILITY_VIEW_PERMISSION_ID);
     }
 
     private List<Map<String, Object>> getImages(Long facilityId) {
@@ -455,6 +513,7 @@ public class FacilitiesService {
         return safeQuery("""
                 SELECT mp.map_point_id,
                        mp.map_id,
+                       mp.target_id,
                        mp.x,
                        mp.y
                   FROM map_points mp
@@ -476,6 +535,7 @@ public class FacilitiesService {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("map_point_id", rs.getLong("map_point_id"));
             data.put("map_id", rs.getLong("map_id"));
+            data.put("facility_id", rs.getLong("target_id"));
             data.put("x_coord", rs.getDouble("x"));
             data.put("y_coord", rs.getDouble("y"));
             return data;
@@ -484,21 +544,23 @@ public class FacilitiesService {
 
     private List<Map<String, Object>> getRoles(Long facilityId) {
         return safeQuery("""
-                SELECT frp.keycloak_role_id,
+                SELECT frp.facility_role_permission_id,
+                       frp.keycloak_role_id,
                        frp.keycloak_role_name,
-                       pm.permission_name
+                       frp.permission_id
                   FROM facility_role_permission frp
                   JOIN permission_master pm
                     ON frp.permission_id = pm.permission_id
                  WHERE frp.facility_id = ?
                    AND frp.deleted_at IS NULL
                    AND pm.deleted_at IS NULL
-                 ORDER BY frp.facility_role_permission_id ASC
+                ORDER BY frp.facility_role_permission_id ASC
                 """, (rs, rowNum) -> {
             Map<String, Object> data = new LinkedHashMap<>();
+            data.put("facility_role_permission_id", rs.getLong("facility_role_permission_id"));
             data.put("keycloak_role_id", rs.getString("keycloak_role_id"));
             data.put("keycloak_role_name", rs.getString("keycloak_role_name"));
-            data.put("permission_code", rs.getString("permission_name"));
+            data.put("permission_code", rs.getLong("permission_id"));
             return data;
         }, facilityId);
     }
@@ -506,6 +568,7 @@ public class FacilitiesService {
     private List<Map<String, Object>> getEquipments(Long facilityId) {
         return safeQuery("""
                 SELECT e.equipment_id,
+                       e.equipment_master_id,
                        em.equipment_name,
                        e.yaw,
                        e.pitch
@@ -522,9 +585,10 @@ public class FacilitiesService {
                 """, (rs, rowNum) -> {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("equipment_id", rs.getLong("equipment_id"));
+            data.put("equipment_master_id", rs.getLong("equipment_master_id"));
             data.put("equipment_name", rs.getString("equipment_name"));
-            data.put("vr_x", rs.getDouble("yaw"));
-            data.put("vr_y", rs.getDouble("pitch"));
+            data.put("yaw", rs.getDouble("yaw"));
+            data.put("pitch", rs.getDouble("pitch"));
             return data;
         }, facilityId);
     }
@@ -545,7 +609,7 @@ public class FacilitiesService {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("annotation_id", rs.getLong("annotation_id"));
             data.put("title", rs.getString("annotation_title"));
-            data.put("type", toAnnotationType(rs.getString("annotation_type")));
+            data.put("type", rs.getString("annotation_type"));
             return data;
         }, facilityId);
     }
@@ -557,6 +621,14 @@ public class FacilitiesService {
                  WHERE facility_id = ?
                    AND deleted_at IS NULL
                 """, facilityId) > 0;
+    }
+
+    private boolean hasVrImage(
+            Long facilityId,
+            Set<String> userRoles
+    ) {
+        return hasFacilityPermission(facilityId, userRoles, FACILITY_VIEW_PERMISSION_ID)
+                && hasVrImage(facilityId);
     }
 
     private boolean hasAnnotation(Long facilityId, String annotationType) {
@@ -572,6 +644,19 @@ public class FacilitiesService {
                 """, facilityId, annotationType) > 0;
     }
 
+    private boolean hasAnnotation(
+            Long facilityId,
+            String annotationType,
+            Set<String> userRoles
+    ) {
+        return hasFacilityPermission(
+                facilityId,
+                userRoles,
+                ANNOTATION_VIEW_PERMISSION_ID,
+                ANNOTATION_EDIT_PERMISSION_ID
+        ) && hasAnnotation(facilityId, annotationType);
+    }
+
     private boolean hasNormalAnnotation(Long facilityId) {
         return count("""
                 SELECT COUNT(*)
@@ -579,10 +664,22 @@ public class FacilitiesService {
                   JOIN annotations a
                     ON ft.facility_id = a.facility_id
                  WHERE ft.facility_id = ?
-                   AND a.annotation_type <> '02'
+                   AND a.annotation_type <> ?
                    AND ft.deleted_at IS NULL
                    AND a.deleted_at IS NULL
-                """, facilityId) > 0;
+                """, facilityId, EMERGENCY_ANNOTATION_TYPE) > 0;
+    }
+
+    private boolean hasNormalAnnotation(
+            Long facilityId,
+            Set<String> userRoles
+    ) {
+        return hasFacilityPermission(
+                facilityId,
+                userRoles,
+                ANNOTATION_VIEW_PERMISSION_ID,
+                ANNOTATION_EDIT_PERMISSION_ID
+        ) && hasNormalAnnotation(facilityId);
     }
 
     private boolean hasEquipment(Long facilityId) {
@@ -595,6 +692,84 @@ public class FacilitiesService {
                    AND ft.deleted_at IS NULL
                    AND e.deleted_at IS NULL
                 """, facilityId) > 0;
+    }
+
+    private boolean hasEquipment(
+            Long facilityId,
+            Set<String> userRoles
+    ) {
+        return hasFacilityPermission(facilityId, userRoles, EQUIPMENT_VIEW_PERMISSION_ID)
+                && hasEquipment(facilityId);
+    }
+
+    private boolean hasFacilityPermission(
+            Long facilityId,
+            Set<String> userRoles,
+            long... permissionIds
+    ) {
+        if (userRoles != null && userRoles.contains("SYS_ADMIN")) {
+            return true;
+        }
+
+        if (userRoles == null || userRoles.isEmpty() || permissionIds.length == 0) {
+            return false;
+        }
+
+        String permissionPlaceholders = java.util.stream.LongStream.of(permissionIds)
+                .mapToObj(id -> "?")
+                .collect(Collectors.joining(", "));
+        String rolePlaceholders = userRoles.stream()
+                .map(role -> "?")
+                .collect(Collectors.joining(", "));
+
+        List<Object> params = new java.util.ArrayList<>();
+        for (long permissionId : permissionIds) {
+            params.add(permissionId);
+        }
+        params.add(facilityId);
+        params.addAll(userRoles);
+
+        Integer permissionCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM facility_role_permission
+                 WHERE permission_id IN (%s)
+                   AND facility_id = ?
+                   AND keycloak_role_id IN (%s)
+                   AND deleted_at IS NULL
+                """.formatted(permissionPlaceholders, rolePlaceholders), Integer.class, params.toArray());
+
+        return permissionCount != null && permissionCount > 0;
+    }
+
+    private boolean hasFacilityRole(
+            Long facilityId,
+            Set<String> userRoles
+    ) {
+        if (userRoles != null && userRoles.contains("SYS_ADMIN")) {
+            return true;
+        }
+
+        if (userRoles == null || userRoles.isEmpty()) {
+            return false;
+        }
+
+        String rolePlaceholders = userRoles.stream()
+                .map(role -> "?")
+                .collect(Collectors.joining(", "));
+
+        List<Object> params = new java.util.ArrayList<>();
+        params.add(facilityId);
+        params.addAll(userRoles);
+
+        Integer permissionCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM facility_role_permission
+                 WHERE facility_id = ?
+                   AND keycloak_role_id IN (%s)
+                   AND deleted_at IS NULL
+                """.formatted(rolePlaceholders), Integer.class, params.toArray());
+
+        return permissionCount != null && permissionCount > 0;
     }
 
     private int count(String sql, Object... args) {
@@ -677,6 +852,15 @@ public class FacilitiesService {
 
         if (permissionCount == null || permissionCount == 0) {
             throw permissionDenied();
+        }
+    }
+
+    private void ensureViewPermission(
+            Long facilityId,
+            Set<String> userRoles
+    ) {
+        if (!hasFacilityRole(facilityId, userRoles)) {
+            throw viewPermissionDenied();
         }
     }
 
@@ -1465,6 +1649,14 @@ public class FacilitiesService {
                 HttpStatus.FORBIDDEN,
                 "permission_denied",
                 "施設を登録する権限がありません"
+        );
+    }
+
+    private KeycloakAdminException viewPermissionDenied() {
+        return new KeycloakAdminException(
+                HttpStatus.FORBIDDEN,
+                "permission_denied",
+                "施設を参照する権限がありません"
         );
     }
 
