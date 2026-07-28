@@ -110,9 +110,25 @@ public class FacilitiesController {
 
     @DeleteMapping("/{facilityId}")
     public ResponseEntity<ApiResponse<Void>> deleteFacility(
-            @PathVariable String facilityId
+            @PathVariable String facilityId,
+            Authentication authentication
     ) {
-        facilitiesService.deleteFacility(parseFacilityId(facilityId));
+        facilitiesService.deleteFacility(
+                parseFacilityId(facilityId),
+                extractRoleNames(authentication)
+        );
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @PostMapping("/{facilityId}")
+    public ResponseEntity<ApiResponse<Void>> deleteFacilityByPost(
+            @PathVariable String facilityId,
+            Authentication authentication
+    ) {
+        facilitiesService.deleteFacility(
+                parseFacilityId(facilityId),
+                extractRoleNames(authentication)
+        );
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 

@@ -103,6 +103,323 @@ Normal body:
 }
 
 
+Before Testing: Create All Required Copy-Check Data
+
+First run the setup SQL in:
+
+docs/facilitiesコピー(SYS_ADMIN）.txt
+
+Section:
+0. Create all required copy-check data for one FULL copy source.
+
+Then run the finder SQL in the same SYS_ADMIN document:
+
+0-A. Check that the FULL copy source row now exists.
+
+For one-query DB verification of copied vr_image / FILES rows, use the SYS_ADMIN document section:
+
+0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
+One-query verification for Excel 1-4-20 to 1-4-38
+
+For one-query DB verification of copied map / FILES rows, use the SYS_ADMIN document section:
+
+0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
+One-query verification for Excel 1-4-40 to 1-4-59
+
+For one-query DB verification of copied map_point rows, use the SYS_ADMIN document section:
+
+0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
+One-query verification for Excel 1-4-61 to 1-4-69
+
+For one-query DB verification of copied roles / FACILITY_ROLE_PERMISSION rows, use the SYS_ADMIN document section:
+
+0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
+One-query verification for Excel 1-4-70 to 1-4-78
+
+For one-query DB verification of copied equipments rows, use the SYS_ADMIN document section:
+
+0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
+One-query verification for Excel 1-4-79 to 1-4-88
+
+For one-query DB verification that annotations were not copied, use the SYS_ADMIN document section:
+
+0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
+One-query verification for Excel 1-4-89
+
+Expected:
+At least 1 row is returned.
+Use the returned facility_id as <request_facility_id>.
+
+For the prepared data, facility_id = 1100 should become a valid FULL copy source.
+
+USER_ADMIN extra requirement:
+The USER_ADMIN token must have a Keycloak role that is registered with permission_id = 10
+for the request facility_id.
+
+Check SQL:
+
+SELECT COUNT(*)
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = <request_facility_id>
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+count = 1 or more.
+
+If count = 0, USER_ADMIN copy should return permission_denied.
+
+
+Before Testing: Permission DB Setup And Facility ID Finder
+
+Purpose:
+For USER_ADMIN copy, the request path facility_id must have permission_id = 10
+for one role contained in the USER_ADMIN access token.
+
+Use this section before every USER_ADMIN success test.
+
+Step 1: Decide the role name used by the token.
+
+Example:
+If your USER_ADMIN token contains role R_USER01, use:
+
+<USER_ADMIN_ROLE> = R_USER01
+
+If your token contains role USER_ADMIN, use:
+
+<USER_ADMIN_ROLE> = USER_ADMIN
+
+Important:
+Use the exact role value that appears in the JWT after backend role extraction.
+In many local tests this is:
+
+R_USER01
+
+
+Step 2: Make sure permission_master has permission_id = 10.
+
+SQL:
+
+INSERT INTO permission_master (
+  permission_id,
+  permission_name,
+  created_at,
+  updated_at,
+  deleted_at
+)
+VALUES (
+  10,
+  '施設編集',
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP,
+  NULL
+)
+ON CONFLICT (permission_id) DO UPDATE
+SET permission_name = EXCLUDED.permission_name,
+    updated_at = CURRENT_TIMESTAMP,
+    deleted_at = NULL;
+
+
+Step 3: Find facilities that already have USER_ADMIN edit permission.
+
+Replace:
+<USER_ADMIN_ROLE> with the token role, for example R_USER01.
+
+Current backend note:
+For permission checks, the current Java code compares the token role with
+facility_role_permission.keycloak_role_id.
+Therefore, a row with only keycloak_role_name is not enough for USER_ADMIN copy success.
+
+SQL:
+
+SELECT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  frp.permission_id,
+  frp.keycloak_role_id,
+  frp.keycloak_role_name
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.permission_id = 10
+ AND frp.keycloak_role_id IN ('<USER_ADMIN_ROLE>')
+ AND frp.deleted_at IS NULL
+WHERE ft.deleted_at IS NULL
+ORDER BY ft.facility_id;
+
+If this returns rows:
+Use one returned facility_id as <request_facility_id>.
+
+If this returns 0 rows:
+Run Step 4 to create permission data.
+
+
+Step 4: Create USER_ADMIN edit permission for prepared copy source IDs.
+
+Use this if you are testing the prepared data from the SYS_ADMIN copy doc.
+Replace R_USER01 with your real <USER_ADMIN_ROLE> if different.
+
+SQL:
+
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name,
+  created_at,
+  updated_at,
+  deleted_at
+)
+SELECT
+  10,
+  source.facility_id,
+  'R_USER01',
+  'R_USER01',
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP,
+  NULL
+FROM (
+  VALUES
+    (1100),
+    (9100500),
+    (9200500)
+) AS source(facility_id)
+WHERE EXISTS (
+  SELECT 1
+  FROM facilities_tree ft
+  WHERE ft.facility_id = source.facility_id
+    AND ft.deleted_at IS NULL
+)
+AND NOT EXISTS (
+  SELECT 1
+  FROM facility_role_permission frp
+  WHERE frp.permission_id = 10
+    AND frp.facility_id = source.facility_id
+    AND frp.keycloak_role_id = 'R_USER01'
+    AND frp.deleted_at IS NULL
+);
+
+
+Step 5: Create USER_ADMIN edit permission for any specific facility.
+
+Use this when you selected a different <request_facility_id>.
+Replace both placeholders.
+
+SQL:
+
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name,
+  created_at,
+  updated_at,
+  deleted_at
+)
+SELECT
+  10,
+  <request_facility_id>,
+  '<USER_ADMIN_ROLE>',
+  '<USER_ADMIN_ROLE>',
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP,
+  NULL
+WHERE EXISTS (
+  SELECT 1
+  FROM facilities_tree
+  WHERE facility_id = <request_facility_id>
+    AND deleted_at IS NULL
+)
+AND NOT EXISTS (
+  SELECT 1
+  FROM facility_role_permission
+  WHERE permission_id = 10
+    AND facility_id = <request_facility_id>
+    AND keycloak_role_id = '<USER_ADMIN_ROLE>'
+    AND deleted_at IS NULL
+);
+
+
+Step 6: Fetch the request facility_id having permission.
+
+Replace:
+<USER_ADMIN_ROLE> with your token role.
+
+SQL:
+
+SELECT
+  ft.facility_id AS request_facility_id,
+  ft.parent_id AS source_current_parent_id,
+  ft.facility_name,
+  frp.permission_id,
+  COALESCE(frp.keycloak_role_id, frp.keycloak_role_name) AS matched_role
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.permission_id = 10
+ AND frp.keycloak_role_id IN ('<USER_ADMIN_ROLE>')
+ AND frp.deleted_at IS NULL
+WHERE ft.deleted_at IS NULL
+ORDER BY ft.facility_id;
+
+Use:
+request_facility_id as the path ID in:
+
+POST http://localhost:8081/facilities/<request_facility_id>/copy
+
+
+Step 7: Fetch destination parent_id and target_facility_id for a success copy.
+
+For first-position copy:
+
+SELECT facility_id AS parent_id, facility_name
+FROM facilities_tree
+WHERE deleted_at IS NULL
+  AND facility_id <> <request_facility_id>
+ORDER BY facility_id
+LIMIT 1;
+
+Use body:
+
+{
+  "parent_id": <parent_id>,
+  "target_facility_id": null
+}
+
+For between-copy using prepared data:
+
+Use:
+request_facility_id = 9100500
+parent_id = 9100200
+target_facility_id = 9100300
+
+For last-position copy using prepared data:
+
+Use:
+request_facility_id = 9200500
+parent_id = 9200200
+target_facility_id = 9200400
+
+
+Step 8: Final permission confirmation before Postman.
+
+Replace values with your actual request facility and role.
+
+SQL:
+
+SELECT COUNT(*) AS edit_permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = <request_facility_id>
+  AND keycloak_role_id IN ('<USER_ADMIN_ROLE>')
+  AND deleted_at IS NULL;
+
+Expected:
+edit_permission_count >= 1
+
+
 Before Testing: Find USER_ADMIN Roles
 
 Use the USER_ADMIN access token in jwt.io or your token decoder.
@@ -273,6 +590,158 @@ Expected after adding permission:
     "facility_id": <new_copied_facility_id>
   }
 }
+
+
+Case 1-5 Note: Between Copy With No Related Data / No Children
+
+For the SYS_ADMIN version, use the inserted setup and checks in:
+
+docs/facilitiesコピー(SYS_ADMIN）.txt
+
+Section:
+Case 1-5: Request parameters - copy between facilities
+Concrete setup SQL for Case 1-5 / 1-6 / 1-7 / 1-8
+
+Important USER_ADMIN difference:
+Current backend requires permission_id = 10 on the request facility_id.
+Therefore, for USER_ADMIN, facility_id 9100500 needs a facility_role_permission row before copy can succeed.
+
+This means the USER_ADMIN DB cannot be perfectly "no related rows" if permission is stored in
+facility_role_permission and the API is expected to succeed. Treat the permission_id = 10 row as
+the USER_ADMIN authorization setup row, not as copied business data.
+
+Add USER_ADMIN permission for prepared source 9100500:
+
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name,
+  created_at,
+  updated_at,
+  deleted_at
+)
+SELECT
+  10,
+  9100500,
+  'R_USER01',
+  'R_USER01',
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP,
+  NULL
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM facility_role_permission
+  WHERE permission_id = 10
+    AND facility_id = 9100500
+    AND keycloak_role_id = 'R_USER01'
+    AND deleted_at IS NULL
+);
+
+Permission check:
+
+SELECT COUNT(*)
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 9100500
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+count = 1
+
+Postman:
+
+POST http://localhost:8081/facilities/9100500/copy
+
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "parent_id": 9100200,
+  "target_facility_id": 9100300
+}
+
+DB 1-7 checks:
+Use the same SYS_ADMIN Case 1-7 SQL.
+
+DB 1-8 checks:
+Use the same SYS_ADMIN Case 1-8 SQL, but expect copied_role_count to equal 1 if the authorization
+permission row is copied by the current backend.
+
+
+Case 1-9 Note: Last Position Copy
+
+For the SYS_ADMIN version, use the inserted setup and checks in:
+
+docs/facilitiesコピー(SYS_ADMIN）.txt
+
+Section:
+Case 1-9: Request parameters - copy to last position
+Concrete setup SQL for Case 1-9 / 1-10 / 1-11
+
+Important USER_ADMIN difference:
+Current backend requires permission_id = 10 on the request facility_id.
+Therefore, for USER_ADMIN, facility_id 9200500 needs a facility_role_permission row before copy can succeed.
+
+Add USER_ADMIN permission for prepared source 9200500:
+
+INSERT INTO facility_role_permission (
+  permission_id,
+  facility_id,
+  keycloak_role_id,
+  keycloak_role_name,
+  created_at,
+  updated_at,
+  deleted_at
+)
+SELECT
+  10,
+  9200500,
+  'R_USER01',
+  'R_USER01',
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP,
+  NULL
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM facility_role_permission
+  WHERE permission_id = 10
+    AND facility_id = 9200500
+    AND keycloak_role_id = 'R_USER01'
+    AND deleted_at IS NULL
+);
+
+Permission check:
+
+SELECT COUNT(*)
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 9200500
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+count = 1
+
+Postman:
+
+POST http://localhost:8081/facilities/9200500/copy
+
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "parent_id": 9200200,
+  "target_facility_id": 9200400
+}
+
+DB checks:
+Use the same SYS_ADMIN Case 1-10 and Case 1-11 SQL.
 
 
 Shared SYS_ADMIN Steps

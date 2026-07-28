@@ -44,6 +44,7 @@ public class FacilitiesService {
         facility.facilityId = rs.getLong("facility_id");
         facility.parentId = nullableLong(rs, "parent_id");
         facility.facilityName = rs.getString("facility_name");
+        facility.sortOrder = nullableInteger(rs, "sort_order");
         facility.treeLevel = nullableInteger(rs, "tree_level");
         facility.isLeaf = rs.getBoolean("is_leaf");
         facility.publishMode = toPublishMode(rs.getString("public_flag"));
@@ -270,16 +271,39 @@ public class FacilitiesService {
     }
 
     @Transactional
-    public void deleteFacility(Long facilityId) {
-        FacilityRecord facility = getActiveFacility(facilityId);
+    public void deleteFacility(
+            Long facilityId,
+            Set<String> userRoles
+    ) {
+        FacilityRecord facility = findActiveFacility(facilityId);
+        if (facility == null) {
+            return;
+        }
 
-        jdbcTemplate.update("""
-                UPDATE facilities_tree
-                   SET deleted_at = CURRENT_TIMESTAMP,
-                       updated_at = CURRENT_TIMESTAMP
-                 WHERE facility_id = ?
-                    OR parent_id = ?
-                """, facilityId, facilityId);
+        ensureEditPermission(facilityId, userRoles);
+
+        List<Long> facilityIds = getFacilityAndDescendantIds(facilityId);
+        List<Long> annotationIds = getAnnotationIds(facilityIds);
+        List<Long> imageIds = getFacilityImageIds(facilityIds);
+        List<Long> imageFileIds = getFacilityImageFileIds(facilityIds);
+        List<Long> mapFileIds = getMapFileIds(facilityIds);
+        List<Long> annotationLinkedFileIds = getAnnotationLinkedFileIds(annotationIds);
+
+        softDeleteAnnotationComments(annotationIds);
+        softDeleteAnnotationFiles(annotationIds);
+        softDeleteFiles(annotationLinkedFileIds);
+
+        softDeleteHotspots(imageIds);
+        softDeleteFiles(imageFileIds);
+
+        softDeleteFiles(mapFileIds);
+        softDeleteByFacilityIds("facility_role_permission", facilityIds);
+        softDeleteByFacilityIds("annotations", facilityIds);
+        softDeleteByFacilityIds("facility_images", facilityIds);
+        softDeleteByFacilityIds("equipments", facilityIds);
+        softDeleteMapPoints(facilityIds);
+        softDeleteByFacilityIds("maps", facilityIds);
+        softDeleteFacilities(facilityIds);
 
         updateParentLeafState(facility.parentId);
     }
@@ -340,41 +364,16 @@ public class FacilitiesService {
         int sortOrder = createSortOrder(parentId, targetFacilityId);
         int treeLevel = parent == null || parent.treeLevel == null ? 1 : parent.treeLevel + 1;
 
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbcTemplate.update(connection -> {
-            PreparedStatement ps = connection.prepareStatement("""
-                    INSERT INTO facilities_tree (
-                        parent_id,
-                        facility_name,
-                        sort_order,
-                        tree_level,
-                        is_leaf,
-                        public_flag,
-                        outer_flag,
-                        facility_description,
-                        authority_setting_flg,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES (?, ?, ?, ?, TRUE, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, new String[]{"facility_id"});
-            if (parentId == null) {
-                ps.setObject(1, null);
-            } else {
-                ps.setLong(1, parentId);
-            }
-            ps.setString(2, source.facilityName);
-            ps.setInt(3, sortOrder);
-            ps.setInt(4, treeLevel);
-            ps.setString(5, toPublicFlag(source.publishMode));
-            ps.setBoolean(6, Boolean.TRUE.equals(source.isOutdoor));
-            ps.setString(7, source.detail);
-            ps.setBoolean(8, Boolean.TRUE.equals(source.hasPermission));
-            return ps;
-        }, keyHolder);
-
-        Long copiedFacilityId = Objects.requireNonNull(keyHolder.getKey()).longValue();
-        copyRelatedRows(facilityId, copiedFacilityId);
+        CopyContext copyContext = new CopyContext();
+        Long copiedFacilityId = copyFacilityTree(
+                source,
+                parentId,
+                sortOrder,
+                treeLevel,
+                copyContext
+        );
+        copyMapPoints(copyContext);
+        copyHotspots(copyContext);
         updateParentLeafState(parentId);
 
         Map<String, Object> data = new LinkedHashMap<>();
@@ -828,6 +827,222 @@ public class FacilitiesService {
         return results.getFirst();
     }
 
+    private FacilityRecord findActiveFacility(Long facilityId) {
+        List<FacilityRecord> results = jdbcTemplate.query("""
+                SELECT *
+                  FROM facilities_tree
+                 WHERE facility_id = ?
+                   AND deleted_at IS NULL
+                """, facilityRowMapper, facilityId);
+
+        return results.isEmpty() ? null : results.getFirst();
+    }
+
+    private List<Long> getFacilityAndDescendantIds(Long facilityId) {
+        return jdbcTemplate.query("""
+                WITH RECURSIVE targets AS (
+                    SELECT facility_id
+                      FROM facilities_tree
+                     WHERE facility_id = ?
+                       AND deleted_at IS NULL
+                    UNION ALL
+                    SELECT child.facility_id
+                      FROM facilities_tree child
+                      JOIN targets parent
+                        ON child.parent_id = parent.facility_id
+                     WHERE child.deleted_at IS NULL
+                )
+                SELECT facility_id
+                  FROM targets
+                """, (rs, rowNum) -> rs.getLong("facility_id"), facilityId);
+    }
+
+    private List<Long> getAnnotationIds(List<Long> facilityIds) {
+        return queryLongsByIds(
+                "SELECT annotation_id FROM annotations WHERE facility_id IN (%s) AND deleted_at IS NULL",
+                "annotation_id",
+                facilityIds
+        );
+    }
+
+    private List<Long> getAnnotationLinkedFileIds(List<Long> annotationIds) {
+        return queryLongsByIds(
+                "SELECT file_id FROM annotation_files WHERE annotation_id IN (%s)",
+                "file_id",
+                annotationIds
+        );
+    }
+
+    private List<Long> getFacilityImageIds(List<Long> facilityIds) {
+        return queryLongsByIds(
+                "SELECT image_id FROM facility_images WHERE facility_id IN (%s) AND deleted_at IS NULL",
+                "image_id",
+                facilityIds
+        );
+    }
+
+    private List<Long> getFacilityImageFileIds(List<Long> facilityIds) {
+        return queryLongsByIds(
+                "SELECT file_id FROM facility_images WHERE facility_id IN (%s) AND deleted_at IS NULL",
+                "file_id",
+                facilityIds
+        );
+    }
+
+    private List<Long> getMapFileIds(List<Long> facilityIds) {
+        return queryLongsByIds(
+                "SELECT file_id FROM maps WHERE facility_id IN (%s) AND deleted_at IS NULL",
+                "file_id",
+                facilityIds
+        );
+    }
+
+    private List<Long> queryLongsByIds(
+            String sqlTemplate,
+            String columnName,
+            List<Long> ids
+    ) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+
+        try {
+            return jdbcTemplate.query(
+                    sqlTemplate.formatted(placeholders(ids.size())),
+                    (rs, rowNum) -> rs.getLong(columnName),
+                    ids.toArray()
+            );
+        } catch (BadSqlGrammarException exception) {
+            return List.of();
+        }
+    }
+
+    private void softDeleteFacilities(List<Long> facilityIds) {
+        safeUpdateByIds("""
+                UPDATE facilities_tree
+                   SET deleted_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE facility_id IN (%s)
+                   AND deleted_at IS NULL
+                """, facilityIds);
+    }
+
+    private void softDeleteByFacilityIds(
+            String tableName,
+            List<Long> facilityIds
+    ) {
+        if (!List.of(
+                "facility_role_permission",
+                "annotations",
+                "facility_images",
+                "equipments",
+                "maps"
+        ).contains(tableName)) {
+            throw invalidRequest("table is invalid");
+        }
+
+        safeUpdateByIds("""
+                UPDATE %s
+                   SET deleted_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE facility_id IN (%%s)
+                   AND deleted_at IS NULL
+                """.formatted(tableName), facilityIds);
+    }
+
+    private void softDeleteMapPoints(List<Long> facilityIds) {
+        safeUpdateByIds("""
+                UPDATE map_points
+                   SET deleted_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE (facility_id IN (%s) OR target_id IN (%s))
+                   AND deleted_at IS NULL
+                """, facilityIds, facilityIds);
+    }
+
+    private void softDeleteAnnotationComments(List<Long> annotationIds) {
+        safeUpdateByIds("""
+                UPDATE annotation_comments
+                   SET deleted_at = CURRENT_TIMESTAMP
+                 WHERE annotation_id IN (%s)
+                   AND deleted_at IS NULL
+                """, annotationIds);
+    }
+
+    private void softDeleteAnnotationFiles(List<Long> annotationIds) {
+        safeUpdateByIds("""
+                UPDATE annotation_files
+                   SET deleted_at = CURRENT_TIMESTAMP
+                 WHERE annotation_id IN (%s)
+                   AND deleted_at IS NULL
+                """, annotationIds);
+    }
+
+    private void softDeleteHotspots(List<Long> imageIds) {
+        safeUpdateByIds("""
+                UPDATE hotspots
+                   SET deleted_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE image_id IN (%s)
+                   AND deleted_at IS NULL
+                """, imageIds);
+    }
+
+    private void softDeleteFiles(List<Long> fileIds) {
+        safeUpdateByIds("""
+                UPDATE files
+                   SET deleted_at = CURRENT_TIMESTAMP
+                 WHERE file_id IN (%s)
+                   AND deleted_at IS NULL
+                """, fileIds);
+    }
+
+    private void safeUpdateByIds(
+            String sqlTemplate,
+            List<Long> ids
+    ) {
+        if (ids.isEmpty()) {
+            return;
+        }
+
+        try {
+            jdbcTemplate.update(
+                    sqlTemplate.formatted(placeholders(ids.size())),
+                    ids.toArray()
+            );
+        } catch (BadSqlGrammarException ignored) {
+            // Some test DB versions omit optional Excel tables/columns.
+        }
+    }
+
+    private void safeUpdateByIds(
+            String sqlTemplate,
+            List<Long> firstIds,
+            List<Long> secondIds
+    ) {
+        if (firstIds.isEmpty() && secondIds.isEmpty()) {
+            return;
+        }
+
+        List<Long> first = firstIds.isEmpty() ? List.of(-1L) : firstIds;
+        List<Long> second = secondIds.isEmpty() ? List.of(-1L) : secondIds;
+        List<Object> params = new java.util.ArrayList<>();
+        params.addAll(first);
+        params.addAll(second);
+
+        try {
+            jdbcTemplate.update(
+                    sqlTemplate.formatted(
+                            placeholders(first.size()),
+                            placeholders(second.size())
+                    ),
+                    params.toArray()
+            );
+        } catch (BadSqlGrammarException ignored) {
+            // Some test DB versions omit optional Excel tables/columns.
+        }
+    }
+
     private void ensureCreatePermission(
             Long parentId,
             Set<String> userRoles
@@ -1222,60 +1437,231 @@ public class FacilitiesService {
                 """, facilityId, treeLevelDelta);
     }
 
-    private void copyRelatedRows(Long sourceFacilityId, Long copiedFacilityId) {
-        copyFacilityImages(sourceFacilityId, copiedFacilityId);
-        copyMaps(sourceFacilityId, copiedFacilityId);
-        copyRoles(sourceFacilityId, copiedFacilityId);
-        copyEquipments(sourceFacilityId, copiedFacilityId);
-        copyAnnotations(sourceFacilityId, copiedFacilityId);
+    private Long copyFacilityTree(
+            FacilityRecord source,
+            Long copiedParentId,
+            int sortOrder,
+            int treeLevel,
+            CopyContext copyContext
+    ) {
+        Long copiedFacilityId = insertCopiedFacility(source, copiedParentId, sortOrder, treeLevel);
+        copyContext.facilityIds.put(source.facilityId, copiedFacilityId);
+
+        copyFacilityImages(source.facilityId, copiedFacilityId, copyContext);
+        copyMaps(source.facilityId, copiedFacilityId, copyContext);
+        copyRoles(source.facilityId, copiedFacilityId);
+        copyEquipments(source.facilityId, copiedFacilityId);
+
+        for (FacilityRecord child : getActiveChildren(source.facilityId)) {
+            copyFacilityTree(
+                    child,
+                    copiedFacilityId,
+                    child.sortOrder == null ? 10_000_000 : child.sortOrder,
+                    treeLevel + 1,
+                    copyContext
+            );
+        }
+
+        return copiedFacilityId;
     }
 
-    private void copyFacilityImages(Long sourceFacilityId, Long copiedFacilityId) {
-        jdbcTemplate.update("""
-                INSERT INTO facility_images (
-                    facility_id,
-                    file_id,
-                    image_name,
-                    shooting_height,
-                    ceiling_height,
-                    created_at,
-                    updated_at
-                )
-                SELECT ?,
+    private Long insertCopiedFacility(
+            FacilityRecord source,
+            Long copiedParentId,
+            int sortOrder,
+            int treeLevel
+    ) {
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement("""
+                    INSERT INTO facilities_tree (
+                        parent_id,
+                        facility_name,
+                        sort_order,
+                        tree_level,
+                        is_leaf,
+                        public_flag,
+                        outer_flag,
+                        facility_description,
+                        authority_setting_flg,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, new String[]{"facility_id"});
+            if (copiedParentId == null) {
+                ps.setObject(1, null);
+            } else {
+                ps.setLong(1, copiedParentId);
+            }
+            ps.setString(2, source.facilityName);
+            ps.setInt(3, sortOrder);
+            ps.setInt(4, treeLevel);
+            ps.setBoolean(5, Boolean.TRUE.equals(source.isLeaf));
+            ps.setString(6, toPublicFlag(source.publishMode));
+            ps.setBoolean(7, Boolean.TRUE.equals(source.isOutdoor));
+            ps.setString(8, source.detail);
+            ps.setBoolean(9, Boolean.TRUE.equals(source.hasPermission));
+            return ps;
+        }, keyHolder);
+
+        return Objects.requireNonNull(keyHolder.getKey()).longValue();
+    }
+
+    private List<FacilityRecord> getActiveChildren(Long facilityId) {
+        return jdbcTemplate.query("""
+                SELECT facility_id,
+                       parent_id,
+                       facility_name,
+                       sort_order,
+                       tree_level,
+                       is_leaf,
+                       public_flag,
+                       outer_flag,
+                       facility_description,
+                       authority_setting_flg,
+                       created_at,
+                       updated_at,
+                       deleted_at
+                  FROM facilities_tree
+                 WHERE parent_id = ?
+                   AND deleted_at IS NULL
+                 ORDER BY sort_order ASC, facility_id ASC
+                """, facilityRowMapper, facilityId);
+    }
+
+    private void copyFacilityImages(
+            Long sourceFacilityId,
+            Long copiedFacilityId,
+            CopyContext copyContext
+    ) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT image_id,
                        file_id,
                        image_name,
                        shooting_height,
-                       ceiling_height,
-                       CURRENT_TIMESTAMP,
-                       CURRENT_TIMESTAMP
+                       ceiling_height
                   FROM facility_images
                  WHERE facility_id = ?
                    AND deleted_at IS NULL
-                """, copiedFacilityId, sourceFacilityId);
+                 ORDER BY image_id ASC
+                """, sourceFacilityId);
+
+        for (Map<String, Object> row : rows) {
+            Long sourceImageId = asLong(row.get("image_id"));
+            Long copiedFileId = copyFile(asLong(row.get("file_id")));
+            Long copiedImageId = insertCopiedFacilityImage(copiedFacilityId, copiedFileId, row);
+            copyContext.imageIds.put(sourceImageId, copiedImageId);
+        }
     }
 
-    private void copyMaps(Long sourceFacilityId, Long copiedFacilityId) {
-        jdbcTemplate.update("""
-                INSERT INTO maps (
-                    facility_id,
-                    file_id,
-                    map_name,
-                    image_width,
-                    image_height,
-                    created_at,
-                    updated_at
-                )
-                SELECT ?,
+    private Long insertCopiedFacilityImage(
+            Long copiedFacilityId,
+            Long copiedFileId,
+            Map<String, Object> sourceImage
+    ) {
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement("""
+                    INSERT INTO facility_images (
+                        facility_id,
+                        file_id,
+                        image_name,
+                        shooting_height,
+                        ceiling_height,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, new String[]{"image_id"});
+            ps.setLong(1, copiedFacilityId);
+            ps.setLong(2, copiedFileId);
+            ps.setString(3, stringValue(sourceImage.get("image_name")));
+            ps.setInt(4, asLong(sourceImage.get("shooting_height")).intValue());
+            ps.setInt(5, asLong(sourceImage.get("ceiling_height")).intValue());
+            return ps;
+        }, keyHolder);
+
+        return Objects.requireNonNull(keyHolder.getKey()).longValue();
+    }
+
+    private void copyMaps(
+            Long sourceFacilityId,
+            Long copiedFacilityId,
+            CopyContext copyContext
+    ) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT map_id,
                        file_id,
                        map_name,
                        image_width,
-                       image_height,
-                       CURRENT_TIMESTAMP,
-                       CURRENT_TIMESTAMP
+                       image_height
                   FROM maps
                  WHERE facility_id = ?
                    AND deleted_at IS NULL
-                """, copiedFacilityId, sourceFacilityId);
+                 ORDER BY map_id ASC
+                """, sourceFacilityId);
+
+        for (Map<String, Object> row : rows) {
+            Long sourceMapId = asLong(row.get("map_id"));
+            Long copiedFileId = copyFile(asLong(row.get("file_id")));
+            Long copiedMapId = insertCopiedMap(copiedFacilityId, copiedFileId, row);
+            copyContext.mapIds.put(sourceMapId, copiedMapId);
+        }
+    }
+
+    private Long insertCopiedMap(
+            Long copiedFacilityId,
+            Long copiedFileId,
+            Map<String, Object> sourceMap
+    ) {
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement("""
+                    INSERT INTO maps (
+                        facility_id,
+                        file_id,
+                        map_name,
+                        image_width,
+                        image_height,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, new String[]{"map_id"});
+            ps.setLong(1, copiedFacilityId);
+            ps.setLong(2, copiedFileId);
+            ps.setString(3, stringValue(sourceMap.get("map_name")));
+            ps.setInt(4, asLong(sourceMap.get("image_width")).intValue());
+            ps.setInt(5, asLong(sourceMap.get("image_height")).intValue());
+            return ps;
+        }, keyHolder);
+
+        return Objects.requireNonNull(keyHolder.getKey()).longValue();
+    }
+
+    private Long copyFile(Long sourceFileId) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO files (
+                    file_name,
+                    file_path,
+                    file_type,
+                    file_size,
+                    s3_bucket,
+                    created_at,
+                    deleted_at
+                )
+                SELECT file_name,
+                       file_path,
+                       file_type,
+                       file_size,
+                       s3_bucket,
+                       CURRENT_TIMESTAMP,
+                       deleted_at
+                  FROM files
+                 WHERE file_id = ?
+                RETURNING file_id
+                """, Long.class, sourceFileId);
     }
 
     private void copyRoles(Long sourceFacilityId, Long copiedFacilityId) {
@@ -1322,36 +1708,125 @@ public class FacilitiesService {
                 """, copiedFacilityId, sourceFacilityId);
     }
 
-    private void copyAnnotations(Long sourceFacilityId, Long copiedFacilityId) {
-        jdbcTemplate.update("""
-                INSERT INTO annotations (
-                    facility_id,
-                    annotation_type,
-                    annotation_title,
-                    annotation_content,
-                    created_by,
-                    display_expire_type,
-                    display_expire_at,
-                    yaw,
-                    pitch,
-                    created_at,
-                    updated_at
-                )
-                SELECT ?,
-                       annotation_type,
-                       annotation_title,
-                       annotation_content,
-                       created_by,
-                       display_expire_type,
-                       display_expire_at,
-                       yaw,
-                       pitch,
-                       CURRENT_TIMESTAMP,
-                       CURRENT_TIMESTAMP
-                  FROM annotations
+    private void copyMapPoints(CopyContext copyContext) {
+        if (copyContext.facilityIds.isEmpty()) {
+            return;
+        }
+
+        List<Long> sourceFacilityIds = List.copyOf(copyContext.facilityIds.keySet());
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT map_id,
+                       facility_id,
+                       target_id,
+                       x,
+                       y,
+                       deleted_at
+                  FROM map_points
+                 WHERE target_id IN (%s)
+                   AND deleted_at IS NULL
+                 ORDER BY map_point_id ASC
+                """.formatted(placeholders(sourceFacilityIds.size())), sourceFacilityIds.toArray());
+
+        for (Map<String, Object> row : rows) {
+            Long copiedTargetId = copyContext.facilityIds.get(asLong(row.get("target_id")));
+            if (copiedTargetId == null) {
+                continue;
+            }
+
+            Long copiedMapId = copyContext.mapIds.get(asLong(row.get("map_id")));
+            if (copiedMapId == null) {
+                Long sourceTargetId = asLong(row.get("target_id"));
+                Long sourceParentId = getActiveFacility(sourceTargetId).parentId;
+                Long copiedParentId = copyContext.facilityIds.get(sourceParentId);
+                copiedMapId = firstActiveMapId(copiedParentId == null ? sourceParentId : copiedParentId);
+            }
+
+            if (copiedMapId == null) {
+                continue;
+            }
+
+            jdbcTemplate.update("""
+                    INSERT INTO map_points (
+                        map_id,
+                        facility_id,
+                        x,
+                        y,
+                        target_id,
+                        created_at,
+                        updated_at,
+                        deleted_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """,
+                    copiedMapId,
+                    copiedTargetId,
+                    asLong(row.get("x")).intValue(),
+                    asLong(row.get("y")).intValue(),
+                    copiedTargetId,
+                    row.get("deleted_at")
+            );
+        }
+    }
+
+    private Long firstActiveMapId(Long facilityId) {
+        if (facilityId == null) {
+            return null;
+        }
+
+        return jdbcTemplate.query("""
+                SELECT map_id
+                  FROM maps
                  WHERE facility_id = ?
                    AND deleted_at IS NULL
-                """, copiedFacilityId, sourceFacilityId);
+                 ORDER BY map_id ASC
+                 LIMIT 1
+                """, rs -> rs.next() ? rs.getLong("map_id") : null, facilityId);
+    }
+
+    private void copyHotspots(CopyContext copyContext) {
+        if (copyContext.imageIds.isEmpty()) {
+            return;
+        }
+
+        List<Long> sourceImageIds = List.copyOf(copyContext.imageIds.keySet());
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT image_id,
+                       target_id,
+                       yaw,
+                       pitch,
+                       deleted_at
+                  FROM hotspots
+                 WHERE image_id IN (%s)
+                   AND deleted_at IS NULL
+                 ORDER BY hotspot_id ASC
+                """.formatted(placeholders(sourceImageIds.size())), sourceImageIds.toArray());
+
+        for (Map<String, Object> row : rows) {
+            Long copiedImageId = copyContext.imageIds.get(asLong(row.get("image_id")));
+            Long copiedTargetId = copyContext.facilityIds.getOrDefault(
+                    asLong(row.get("target_id")),
+                    asLong(row.get("target_id"))
+            );
+
+            jdbcTemplate.update("""
+                    INSERT INTO hotspots (
+                        image_id,
+                        target_id,
+                        yaw,
+                        pitch,
+                        created_at,
+                        updated_at,
+                        deleted_at
+                    )
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """,
+                    copiedImageId,
+                    copiedTargetId,
+                    requiredDouble(row.get("yaw"), "yaw"),
+                    requiredDouble(row.get("pitch"), "pitch"),
+                    row.get("deleted_at")
+            );
+        }
     }
 
     private void validateCreateRequestKeys(Map<String, Object> request) {
@@ -1716,6 +2191,12 @@ public class FacilitiesService {
         }
     }
 
+    private String placeholders(int count) {
+        return java.util.stream.IntStream.range(0, count)
+                .mapToObj(index -> "?")
+                .collect(Collectors.joining(", "));
+    }
+
     private Boolean asBoolean(Object value) {
         if (value == null) {
             return null;
@@ -1776,6 +2257,7 @@ public class FacilitiesService {
         private Long facilityId;
         private Long parentId;
         private String facilityName;
+        private Integer sortOrder;
         private Integer treeLevel;
         private Boolean isLeaf;
         private String publishMode;
@@ -1785,5 +2267,11 @@ public class FacilitiesService {
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
         private LocalDateTime deletedAt;
+    }
+
+    private static class CopyContext {
+        private final Map<Long, Long> facilityIds = new LinkedHashMap<>();
+        private final Map<Long, Long> imageIds = new LinkedHashMap<>();
+        private final Map<Long, Long> mapIds = new LinkedHashMap<>();
     }
 }

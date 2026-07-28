@@ -16,25 +16,12 @@ POST /facilities/{facilityId}/copy
 Use /copy for Postman copy testing.
 
 Current implementation notes:
-These docs describe the Excel expected behavior. Some later Excel checks may reveal current backend gaps:
+The current backend copies facilities_tree recursively, creates copied DB rows for facility_images, maps,
+facility_role_permission, equipments, map_points, hotspots, and creates new FILES rows for copied
+facility_images/maps. Annotations are not copied.
 
-1. FILES rows:
-   Excel expects new FILES rows for copied facility_images/maps.
-   Current code copies facility_images/maps rows with the same file_id, so new FILES rows may not be created.
-
-2. Physical files:
-   Excel expects physical/S3 files to be copied.
-   Current code appears to copy DB rows only.
-
-3. annotations:
-   Excel expects annotations not to be copied.
-   Current code currently copies annotations for the selected source facility.
-
-4. Children/descendants:
-   Excel expects children and descendants to be copied recursively.
-   Current code currently copies only the selected source facility's direct related rows.
-
-Use the Postman and SQL steps below to confirm each behavior on the target computer.
+Before running the FULL copy cases, first create all required copy-check data with the SQL below.
+Then run the finder SQL and use the returned facility_id as the copy source.
 
 
 Common Postman Setup
@@ -103,6 +90,1141 @@ If you want to copy to the first position under parent_id 1110, use:
 
 
 Before Testing: Prepare Valid IDs
+
+0. Create all required copy-check data for one FULL copy source.
+
+Purpose:
+If the finder SQL returns 0 rows, no active facility has all related rows needed for the Excel 1-4 DB checks.
+Run this setup once on the target computer DB. It prepares facility_id = 1100 as the FULL copy source.
+
+SQL:
+
+BEGIN;
+
+UPDATE facilities_tree
+SET deleted_at = NULL
+WHERE facility_id IN (1000, 1100);
+
+INSERT INTO files (
+  file_id, file_name, file_path, file_type, file_size, s3_bucket, created_at, deleted_at
+) VALUES
+  (5000, 'entrance.jpg', '/5000', 'vr_image', 102400, 'pygmalion-vr-files', CURRENT_TIMESTAMP, NULL),
+  (5009, 'floorplan.png', '/5009', 'map_image', 153600, 'pygmalion-vr-files', CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (file_id) DO UPDATE
+SET deleted_at = NULL;
+
+INSERT INTO permission_master (
+  permission_id, permission_name, created_at, updated_at, deleted_at
+) VALUES
+  (10, '施設編集', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (20, 'VR画像参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (30, '付箋参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (50, '設備参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (permission_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipment_types (
+  equipment_type_id, equipment_type_name, created_at, updated_at, deleted_at
+) VALUES
+  (1, '空調', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (equipment_type_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipment_masters (
+  equipment_master_id,
+  equipment_type_id,
+  equipment_name,
+  equipment_info_json,
+  equipment_info_html,
+  created_at,
+  updated_at,
+  deleted_at
+) VALUES (
+  10,
+  1,
+  '室外機A',
+  '{"maker":"TIS","model":"ABC-10"}',
+  '<p>メーカー: TIS</p>',
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP,
+  NULL
+)
+ON CONFLICT (equipment_master_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO facility_images (
+  facility_id, file_id, image_name, shooting_height, ceiling_height, created_at, updated_at, deleted_at
+)
+SELECT 1100, 5000, 'entrance.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM facility_images
+  WHERE facility_id = 1100
+    AND deleted_at IS NULL
+);
+
+INSERT INTO maps (
+  facility_id, file_id, map_name, image_width, image_height, created_at, updated_at, deleted_at
+)
+SELECT 1100, 5009, 'floorplan.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM maps
+  WHERE facility_id = 1100
+    AND deleted_at IS NULL
+);
+
+INSERT INTO maps (
+  facility_id, file_id, map_name, image_width, image_height, created_at, updated_at, deleted_at
+)
+SELECT 1000, 5009, 'parent-floorplan.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM maps
+  WHERE facility_id = 1000
+    AND deleted_at IS NULL
+);
+
+INSERT INTO facility_role_permission (
+  permission_id, facility_id, keycloak_role_id, keycloak_role_name, created_at, updated_at, deleted_at
+)
+SELECT 10, 1100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM facility_role_permission
+  WHERE permission_id = 10
+    AND facility_id = 1100
+    AND COALESCE(keycloak_role_id, keycloak_role_name) = 'R_USER01'
+    AND deleted_at IS NULL
+);
+
+INSERT INTO facility_role_permission (
+  permission_id, facility_id, keycloak_role_id, keycloak_role_name, created_at, updated_at, deleted_at
+)
+SELECT 20, 1100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM facility_role_permission
+  WHERE permission_id = 20
+    AND facility_id = 1100
+    AND COALESCE(keycloak_role_id, keycloak_role_name) = 'R_USER01'
+    AND deleted_at IS NULL
+);
+
+INSERT INTO facility_role_permission (
+  permission_id, facility_id, keycloak_role_id, keycloak_role_name, created_at, updated_at, deleted_at
+)
+SELECT 30, 1100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM facility_role_permission
+  WHERE permission_id = 30
+    AND facility_id = 1100
+    AND COALESCE(keycloak_role_id, keycloak_role_name) = 'R_USER01'
+    AND deleted_at IS NULL
+);
+
+INSERT INTO equipments (
+  facility_id, equipment_master_id, yaw, pitch, created_at, updated_at, deleted_at
+)
+SELECT 1100, 10, 45, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM equipments
+  WHERE facility_id = 1100
+    AND deleted_at IS NULL
+);
+
+INSERT INTO map_points (
+  map_id, facility_id, x, y, target_id, created_at, updated_at, deleted_at
+)
+SELECT m.map_id, 1000, 50, 50, 1100, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+FROM maps m
+WHERE m.facility_id = 1000
+  AND m.deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM map_points mp
+    WHERE mp.target_id = 1100
+      AND mp.deleted_at IS NULL
+  )
+ORDER BY m.map_id
+LIMIT 1;
+
+COMMIT;
+
+
+0-A. Check that the FULL copy source row now exists.
+
+SQL:
+
+SELECT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  COUNT(DISTINCT fi.image_id) AS vr_image_count,
+  COUNT(DISTINCT m.map_id) AS map_count,
+  COUNT(DISTINCT mp.map_point_id) AS map_point_count,
+  COUNT(DISTINCT frp.facility_role_permission_id) AS role_count,
+  COUNT(DISTINCT e.equipment_id) AS equipment_count,
+  COUNT(DISTINCT child.facility_id) AS child_count
+FROM facilities_tree ft
+LEFT JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+ AND fi.deleted_at IS NULL
+LEFT JOIN maps m
+  ON m.facility_id = ft.facility_id
+ AND m.deleted_at IS NULL
+LEFT JOIN map_points mp
+  ON mp.target_id = ft.facility_id
+ AND mp.deleted_at IS NULL
+LEFT JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.deleted_at IS NULL
+LEFT JOIN equipments e
+  ON e.facility_id = ft.facility_id
+ AND e.deleted_at IS NULL
+LEFT JOIN facilities_tree child
+  ON child.parent_id = ft.facility_id
+ AND child.deleted_at IS NULL
+WHERE ft.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.parent_id, ft.facility_name
+HAVING COUNT(DISTINCT fi.image_id) > 0
+   AND COUNT(DISTINCT m.map_id) > 0
+   AND COUNT(DISTINCT mp.map_point_id) > 0
+   AND COUNT(DISTINCT frp.facility_role_permission_id) > 0
+   AND COUNT(DISTINCT e.equipment_id) > 0
+   AND COUNT(DISTINCT child.facility_id) > 0
+ORDER BY ft.facility_id;
+
+Expected:
+At least 1 row is returned.
+Use the returned facility_id as <valid_facility_id> for FULL copy tests.
+
+
+0-B. Concrete Postman test example using the inserted FULL copy-check data.
+
+Use this example for Excel cases:
+1-2 request parameters
+1-3 response
+1-4 DB values, including checks 1-4-1 through 1-4-97
+
+Prepared source facility:
+<full_source_facility_id> = 1100
+
+Destination parent:
+<different_parent_id> = 2000
+
+target_facility_id:
+NULL
+
+Before sending Postman, confirm source 1100 has all required DB data:
+
+SELECT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  COUNT(DISTINCT fi.image_id) AS vr_image_count,
+  COUNT(DISTINCT m.map_id) AS map_count,
+  COUNT(DISTINCT mp.map_point_id) AS map_point_count,
+  COUNT(DISTINCT frp.facility_role_permission_id) AS role_count,
+  COUNT(DISTINCT e.equipment_id) AS equipment_count,
+  COUNT(DISTINCT child.facility_id) AS child_count
+FROM facilities_tree ft
+LEFT JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+ AND fi.deleted_at IS NULL
+LEFT JOIN maps m
+  ON m.facility_id = ft.facility_id
+ AND m.deleted_at IS NULL
+LEFT JOIN map_points mp
+  ON mp.target_id = ft.facility_id
+ AND mp.deleted_at IS NULL
+LEFT JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.deleted_at IS NULL
+LEFT JOIN equipments e
+  ON e.facility_id = ft.facility_id
+ AND e.deleted_at IS NULL
+LEFT JOIN facilities_tree child
+  ON child.parent_id = ft.facility_id
+ AND child.deleted_at IS NULL
+WHERE ft.facility_id = 1100
+  AND ft.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.parent_id, ft.facility_name;
+
+Expected example:
+facility_id = 1100
+vr_image_count > 0
+map_count > 0
+map_point_count > 0
+role_count > 0
+equipment_count > 0
+child_count > 0
+
+Before sending Postman, save these counts:
+
+SELECT COUNT(*) AS facilities_tree_count_before FROM facilities_tree;
+SELECT COUNT(*) AS files_count_before FROM files;
+SELECT COUNT(*) AS facility_images_count_before FROM facility_images;
+SELECT COUNT(*) AS maps_count_before FROM maps;
+SELECT COUNT(*) AS map_points_count_before FROM map_points;
+SELECT COUNT(*) AS facility_role_permission_count_before FROM facility_role_permission;
+SELECT COUNT(*) AS equipments_count_before FROM equipments;
+SELECT COUNT(*) AS annotations_count_before FROM annotations;
+
+Before sending Postman, save the first existing sort_order under destination parent 2000:
+
+SELECT facility_id, parent_id, sort_order
+FROM facilities_tree
+WHERE parent_id = 2000
+  AND deleted_at IS NULL
+ORDER BY facility_id ASC
+LIMIT 1;
+
+If this returns:
+facility_id = 2100
+sort_order = 10000000
+
+Then expected copied root sort_order is:
+5000000
+
+Postman request:
+
+POST http://localhost:8081/facilities/1100/copy
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "parent_id": 2000,
+  "target_facility_id": null
+}
+
+Expected response:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "errors": null,
+  "data": {
+    "facility_id": <response_facility_id>
+  }
+}
+
+Save response data.facility_id as:
+<response_facility_id>
+
+Example:
+If response says:
+"facility_id": 2234362
+
+Then replace <response_facility_id> with 2234362 in all DB checks below.
+
+
+0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data.
+
+Use:
+<source_facility_id> = 1100
+<destination_parent_id> = 2000
+<response_facility_id> = value returned by Postman
+
+1-4-1 to 1-4-13: copied root facilities_tree row.
+
+SELECT
+  src.facility_id AS source_facility_id,
+  copied.facility_id AS copied_facility_id,
+  copied.parent_id AS copied_parent_id,
+  src.facility_name AS source_name,
+  copied.facility_name AS copied_name,
+  src.facility_description AS source_description,
+  copied.facility_description AS copied_description,
+  copied.sort_order AS copied_sort_order,
+  copied.tree_level AS copied_tree_level,
+  parent.tree_level + 1 AS expected_tree_level,
+  src.is_leaf AS source_is_leaf,
+  copied.is_leaf AS copied_is_leaf,
+  src.public_flag AS source_public_flag,
+  copied.public_flag AS copied_public_flag,
+  src.outer_flag AS source_outer_flag,
+  copied.outer_flag AS copied_outer_flag,
+  src.authority_setting_flg AS source_authority_setting_flg,
+  copied.authority_setting_flg AS copied_authority_setting_flg,
+  copied.created_at,
+  copied.updated_at,
+  copied.deleted_at
+FROM facilities_tree src
+JOIN facilities_tree copied
+  ON copied.facility_id = <response_facility_id>
+LEFT JOIN facilities_tree parent
+  ON parent.facility_id = copied.parent_id
+WHERE src.facility_id = 1100;
+
+Expected:
+copied_facility_id = <response_facility_id>
+copied_facility_id <> 1100
+copied_parent_id = 2000
+copied_name = source_name
+copied_description = source_description
+copied_sort_order = expected first-position sort_order
+copied_tree_level = expected_tree_level
+copied_is_leaf = source_is_leaf
+copied_public_flag = source_public_flag
+copied_outer_flag = source_outer_flag
+copied_authority_setting_flg = source_authority_setting_flg
+created_at and updated_at are POST time
+deleted_at IS NULL
+
+1-4-14 to 1-4-19: destination parent status.
+
+SELECT facility_id, is_leaf, updated_at, deleted_at
+FROM facilities_tree
+WHERE facility_id = 2000;
+
+Expected:
+is_leaf = false
+deleted_at IS NULL
+updated_at is POST time if the parent changed from leaf to non-leaf.
+
+Confirm no unexpected facilities_tree delete:
+
+SELECT COUNT(*) AS facilities_tree_count_after FROM facilities_tree;
+
+Expected:
+facilities_tree_count_after = facilities_tree_count_before + number of copied source/children/descendants.
+
+Get source and copied recursive trees:
+
+WITH RECURSIVE source_tree AS (
+  SELECT facility_id, parent_id, facility_name, sort_order, tree_level
+  FROM facilities_tree
+  WHERE facility_id = 1100
+  UNION ALL
+  SELECT child.facility_id, child.parent_id, child.facility_name, child.sort_order, child.tree_level
+  FROM facilities_tree child
+  JOIN source_tree parent
+    ON child.parent_id = parent.facility_id
+  WHERE child.deleted_at IS NULL
+),
+copied_tree AS (
+  SELECT facility_id, parent_id, facility_name, sort_order, tree_level
+  FROM facilities_tree
+  WHERE facility_id = <response_facility_id>
+  UNION ALL
+  SELECT child.facility_id, child.parent_id, child.facility_name, child.sort_order, child.tree_level
+  FROM facilities_tree child
+  JOIN copied_tree parent
+    ON child.parent_id = parent.facility_id
+  WHERE child.deleted_at IS NULL
+)
+SELECT
+  (SELECT COUNT(*) FROM source_tree) AS source_tree_count,
+  (SELECT COUNT(*) FROM copied_tree) AS copied_tree_count;
+
+Expected:
+source_tree_count = copied_tree_count
+
+1-4-20 to 1-4-39: vr_image and FILES.
+
+SELECT
+  src_fi.image_id AS source_image_id,
+  copied_fi.image_id AS copied_image_id,
+  src_fi.facility_id AS source_facility_id,
+  copied_fi.facility_id AS copied_facility_id,
+  src_fi.file_id AS source_file_id,
+  copied_fi.file_id AS copied_file_id,
+  src_file.file_name AS source_file_name,
+  copied_file.file_name AS copied_file_name,
+  src_file.file_path AS source_file_path,
+  copied_file.file_path AS copied_file_path,
+  src_file.file_type AS source_file_type,
+  copied_file.file_type AS copied_file_type,
+  src_file.file_size AS source_file_size,
+  copied_file.file_size AS copied_file_size,
+  src_file.s3_bucket AS source_s3_bucket,
+  copied_file.s3_bucket AS copied_s3_bucket,
+  copied_file.created_at AS copied_file_created_at,
+  copied_file.deleted_at AS copied_file_deleted_at,
+  src_fi.shooting_height AS source_shooting_height,
+  copied_fi.shooting_height AS copied_shooting_height,
+  src_fi.ceiling_height AS source_ceiling_height,
+  copied_fi.ceiling_height AS copied_ceiling_height,
+  copied_fi.created_at AS copied_image_created_at,
+  copied_fi.updated_at AS copied_image_updated_at,
+  copied_fi.deleted_at AS copied_image_deleted_at
+FROM facility_images src_fi
+JOIN facility_images copied_fi
+  ON copied_fi.facility_id = <response_facility_id>
+JOIN files src_file
+  ON src_file.file_id = src_fi.file_id
+JOIN files copied_file
+  ON copied_file.file_id = copied_fi.file_id
+WHERE src_fi.facility_id = 1100
+  AND src_fi.deleted_at IS NULL
+  AND copied_fi.deleted_at IS NULL;
+
+Expected:
+copied_image_id is new
+copied_facility_id = <response_facility_id>
+copied_file_id is new and copied_file_id <> source_file_id
+file_name/file_path/file_type/file_size/s3_bucket match source
+copied file created_at is POST time
+deleted_at matches source, normally NULL
+shooting_height and ceiling_height match source
+copied image created_at and updated_at are POST time
+
+One-query verification for Excel 1-4-20 to 1-4-38:
+
+Replace:
+<source_facility_id> with 1100
+<response_facility_id> with the copied facility_id returned by Postman
+
+Example:
+If Postman response data.facility_id = 2234594, replace <response_facility_id> with 2234594.
+
+SQL:
+
+SELECT
+  src_fi.image_id AS source_image_id,
+  copied_fi.image_id AS copied_image_id,
+  copied_fi.facility_id AS copied_facility_id,
+  copied_fi.file_id AS copied_file_id,
+  src_fi.file_id AS source_file_id,
+  src_file.file_name AS source_file_name,
+  copied_file.file_name AS copied_file_name,
+  src_file.file_path AS source_file_path,
+  copied_file.file_path AS copied_file_path,
+  src_file.file_type AS source_file_type,
+  copied_file.file_type AS copied_file_type,
+  src_file.file_size AS source_file_size,
+  copied_file.file_size AS copied_file_size,
+  src_file.s3_bucket AS source_s3_bucket,
+  copied_file.s3_bucket AS copied_s3_bucket,
+  src_file.deleted_at AS source_file_deleted_at,
+  copied_file.deleted_at AS copied_file_deleted_at,
+  src_fi.shooting_height AS source_shooting_height,
+  copied_fi.shooting_height AS copied_shooting_height,
+  src_fi.ceiling_height AS source_ceiling_height,
+  copied_fi.ceiling_height AS copied_ceiling_height,
+  copied_fi.created_at AS copied_image_created_at,
+  copied_fi.updated_at AS copied_image_updated_at,
+  copied_fi.deleted_at AS copied_image_deleted_at,
+  copied_file.created_at AS copied_file_created_at
+FROM facility_images src_fi
+JOIN facility_images copied_fi
+  ON copied_fi.facility_id = <response_facility_id>
+JOIN files src_file
+  ON src_file.file_id = src_fi.file_id
+JOIN files copied_file
+  ON copied_file.file_id = copied_fi.file_id
+WHERE src_fi.facility_id = <source_facility_id>
+  AND src_fi.deleted_at IS NULL
+  AND copied_fi.deleted_at IS NULL;
+
+Expected:
+copied_image_id <> source_image_id
+copied_facility_id = <response_facility_id>
+copied_file_id <> source_file_id
+source_file_name = copied_file_name
+source_file_path = copied_file_path
+source_file_type = copied_file_type
+source_file_size = copied_file_size
+source_s3_bucket = copied_s3_bucket
+source_file_deleted_at = copied_file_deleted_at
+source_shooting_height = copied_shooting_height
+source_ceiling_height = copied_ceiling_height
+copied_image_created_at is POST time
+copied_image_updated_at is POST time
+copied_image_deleted_at IS NULL
+copied_file_created_at is POST time
+
+Direct copied FILES row check:
+
+SELECT *
+FROM files
+WHERE file_id = <copied_file_id>;
+
+Expected:
+One row exists.
+file_id = copied_file_id from the one-query result.
+file_name/file_path/file_type/file_size/s3_bucket match the source FILES row.
+created_at is POST time.
+deleted_at matches source, normally NULL.
+
+1-4-40 to 1-4-60: map and FILES.
+
+SELECT
+  src_m.map_id AS source_map_id,
+  copied_m.map_id AS copied_map_id,
+  src_m.facility_id AS source_facility_id,
+  copied_m.facility_id AS copied_facility_id,
+  src_m.file_id AS source_file_id,
+  copied_m.file_id AS copied_file_id,
+  src_file.file_name AS source_file_name,
+  copied_file.file_name AS copied_file_name,
+  src_file.file_path AS source_file_path,
+  copied_file.file_path AS copied_file_path,
+  src_file.file_type AS source_file_type,
+  copied_file.file_type AS copied_file_type,
+  src_file.file_size AS source_file_size,
+  copied_file.file_size AS copied_file_size,
+  src_file.s3_bucket AS source_s3_bucket,
+  copied_file.s3_bucket AS copied_s3_bucket,
+  copied_file.created_at AS copied_file_created_at,
+  copied_file.deleted_at AS copied_file_deleted_at,
+  src_m.map_name AS source_map_name,
+  copied_m.map_name AS copied_map_name,
+  src_m.image_width AS source_image_width,
+  copied_m.image_width AS copied_image_width,
+  src_m.image_height AS source_image_height,
+  copied_m.image_height AS copied_image_height,
+  copied_m.created_at AS copied_map_created_at,
+  copied_m.updated_at AS copied_map_updated_at,
+  copied_m.deleted_at AS copied_map_deleted_at
+FROM maps src_m
+JOIN maps copied_m
+  ON copied_m.facility_id = <response_facility_id>
+JOIN files src_file
+  ON src_file.file_id = src_m.file_id
+JOIN files copied_file
+  ON copied_file.file_id = copied_m.file_id
+WHERE src_m.facility_id = 1100
+  AND src_m.deleted_at IS NULL
+  AND copied_m.deleted_at IS NULL;
+
+Expected:
+copied_map_id is new
+copied_facility_id = <response_facility_id>
+copied_file_id is new and copied_file_id <> source_file_id
+file_name/file_path/file_type/file_size/s3_bucket match source
+copied file created_at is POST time
+deleted_at matches source, normally NULL
+map_name/image_width/image_height match source
+copied map created_at and updated_at are POST time
+
+One-query verification for Excel 1-4-40 to 1-4-59:
+
+Replace:
+<source_facility_id> with 1100
+<response_facility_id> with the copied facility_id returned by Postman
+
+Example:
+If Postman response data.facility_id = 2234594, replace <response_facility_id> with 2234594.
+
+SQL:
+
+SELECT
+  src_m.map_id AS source_map_id,
+  copied_m.map_id AS copied_map_id,
+  copied_m.facility_id AS copied_facility_id,
+  copied_m.file_id AS copied_file_id,
+  src_m.file_id AS source_file_id,
+  src_file.file_name AS source_file_name,
+  copied_file.file_name AS copied_file_name,
+  src_file.file_path AS source_file_path,
+  copied_file.file_path AS copied_file_path,
+  src_file.file_type AS source_file_type,
+  copied_file.file_type AS copied_file_type,
+  src_file.file_size AS source_file_size,
+  copied_file.file_size AS copied_file_size,
+  src_file.s3_bucket AS source_s3_bucket,
+  copied_file.s3_bucket AS copied_s3_bucket,
+  src_file.deleted_at AS source_file_deleted_at,
+  copied_file.deleted_at AS copied_file_deleted_at,
+  src_m.map_name AS source_map_name,
+  copied_m.map_name AS copied_map_name,
+  src_m.image_width AS source_image_width,
+  copied_m.image_width AS copied_image_width,
+  src_m.image_height AS source_image_height,
+  copied_m.image_height AS copied_image_height,
+  copied_m.created_at AS copied_map_created_at,
+  copied_m.updated_at AS copied_map_updated_at,
+  copied_m.deleted_at AS copied_map_deleted_at,
+  copied_file.created_at AS copied_file_created_at
+FROM maps src_m
+JOIN maps copied_m
+  ON copied_m.facility_id = <response_facility_id>
+JOIN files src_file
+  ON src_file.file_id = src_m.file_id
+JOIN files copied_file
+  ON copied_file.file_id = copied_m.file_id
+WHERE src_m.facility_id = <source_facility_id>
+  AND src_m.deleted_at IS NULL
+  AND copied_m.deleted_at IS NULL;
+
+Expected:
+copied_map_id <> source_map_id
+copied_facility_id = <response_facility_id>
+copied_file_id <> source_file_id
+source_file_name = copied_file_name
+source_file_path = copied_file_path
+source_file_type = copied_file_type
+source_file_size = copied_file_size
+source_s3_bucket = copied_s3_bucket
+source_file_deleted_at = copied_file_deleted_at
+source_map_name = copied_map_name
+source_image_width = copied_image_width
+source_image_height = copied_image_height
+copied_map_created_at is POST time
+copied_map_updated_at is POST time
+copied_map_deleted_at IS NULL
+copied_file_created_at is POST time
+
+Direct copied MAP FILES row check:
+
+SELECT *
+FROM files
+WHERE file_id = <copied_file_id>;
+
+Expected:
+One row exists.
+file_id = copied_file_id from the map one-query result.
+file_name/file_path/file_type/file_size/s3_bucket match the source MAPS FILES row.
+created_at is POST time.
+deleted_at matches source, normally NULL.
+
+1-4-61 to 1-4-69: map_point.
+
+SELECT
+  src_mp.map_point_id AS source_map_point_id,
+  copied_mp.map_point_id AS copied_map_point_id,
+  src_mp.map_id AS source_map_id,
+  copied_mp.map_id AS copied_map_id,
+  copied_parent_map.map_id AS expected_copied_parent_map_id,
+  src_mp.facility_id AS source_facility_id,
+  copied_mp.facility_id AS copied_facility_id,
+  src_mp.target_id AS source_target_id,
+  copied_mp.target_id AS copied_target_id,
+  src_mp.x AS source_x,
+  copied_mp.x AS copied_x,
+  src_mp.y AS source_y,
+  copied_mp.y AS copied_y,
+  copied_mp.created_at,
+  copied_mp.updated_at,
+  copied_mp.deleted_at
+FROM map_points src_mp
+JOIN map_points copied_mp
+  ON copied_mp.target_id = <response_facility_id>
+LEFT JOIN maps copied_parent_map
+  ON copied_parent_map.facility_id = 2000
+ AND copied_parent_map.deleted_at IS NULL
+WHERE src_mp.target_id = 1100
+  AND src_mp.deleted_at IS NULL;
+
+Expected:
+copied_map_point_id is new
+copied_target_id = <response_facility_id>
+copied_facility_id = <response_facility_id>
+copied_map_id is the copied parent/destination map used by the copy process
+x and y match source
+created_at and updated_at are POST time
+deleted_at matches source, normally NULL
+
+One-query verification for Excel 1-4-61 to 1-4-69:
+
+Replace:
+<source_facility_id> with 1100
+<destination_parent_id> with 2000
+<response_facility_id> with the copied facility_id returned by Postman
+
+Example:
+If Postman response data.facility_id = 2234594, replace <response_facility_id> with 2234594.
+
+SQL:
+
+SELECT
+  src_mp.map_point_id AS source_map_point_id,
+  copied_mp.map_point_id AS copied_map_point_id,
+  src_mp.map_id AS source_map_id,
+  copied_mp.map_id AS copied_map_id,
+  destination_parent_map.map_id AS expected_destination_parent_map_id,
+  src_mp.facility_id AS source_facility_id,
+  copied_mp.facility_id AS copied_facility_id,
+  src_mp.target_id AS source_target_id,
+  copied_mp.target_id AS copied_target_id,
+  src_mp.x AS source_x,
+  copied_mp.x AS copied_x,
+  src_mp.y AS source_y,
+  copied_mp.y AS copied_y,
+  src_mp.deleted_at AS source_deleted_at,
+  copied_mp.created_at AS copied_created_at,
+  copied_mp.updated_at AS copied_updated_at,
+  copied_mp.deleted_at AS copied_deleted_at
+FROM map_points src_mp
+JOIN map_points copied_mp
+  ON copied_mp.target_id = <response_facility_id>
+LEFT JOIN maps destination_parent_map
+  ON destination_parent_map.facility_id = <destination_parent_id>
+ AND destination_parent_map.deleted_at IS NULL
+WHERE src_mp.target_id = <source_facility_id>
+  AND src_mp.deleted_at IS NULL;
+
+Expected:
+copied_map_point_id <> source_map_point_id
+copied_map_id = expected_destination_parent_map_id
+copied_facility_id = <response_facility_id>
+copied_target_id = <response_facility_id>
+source_x = copied_x
+source_y = copied_y
+copied_created_at is POST time
+copied_updated_at is POST time
+copied_deleted_at = source_deleted_at, normally NULL
+
+1-4-70 to 1-4-78: roles.
+
+SELECT
+  src.facility_role_permission_id AS source_role_row_id,
+  copied.facility_role_permission_id AS copied_role_row_id,
+  src.permission_id AS source_permission_id,
+  copied.permission_id AS copied_permission_id,
+  src.keycloak_role_id AS source_keycloak_role_id,
+  copied.keycloak_role_id AS copied_keycloak_role_id,
+  src.keycloak_role_name AS source_keycloak_role_name,
+  copied.keycloak_role_name AS copied_keycloak_role_name,
+  copied.facility_id AS copied_facility_id,
+  copied.created_at,
+  copied.updated_at,
+  copied.deleted_at
+FROM facility_role_permission src
+JOIN facility_role_permission copied
+  ON copied.facility_id = <response_facility_id>
+ AND copied.permission_id = src.permission_id
+ AND COALESCE(copied.keycloak_role_id, copied.keycloak_role_name)
+     = COALESCE(src.keycloak_role_id, src.keycloak_role_name)
+WHERE src.facility_id = 1100
+  AND src.deleted_at IS NULL
+  AND copied.deleted_at IS NULL
+ORDER BY src.permission_id;
+
+Expected:
+copied role row IDs are new
+copied_permission_id = source_permission_id
+copied_facility_id = <response_facility_id>
+keycloak_role_id/keycloak_role_name match source
+created_at and updated_at are POST time
+deleted_at matches source, normally NULL
+
+One-query verification for Excel 1-4-70 to 1-4-78:
+
+Replace:
+<source_facility_id> with 1100
+<response_facility_id> with the copied facility_id returned by Postman
+
+Example:
+If Postman response data.facility_id = 2234594, replace <response_facility_id> with 2234594.
+
+SQL:
+
+SELECT
+  src.facility_role_permission_id AS source_facility_role_permission_id,
+  copied.facility_role_permission_id AS copied_facility_role_permission_id,
+  src.permission_id AS source_permission_id,
+  copied.permission_id AS copied_permission_id,
+  src.facility_id AS source_facility_id,
+  copied.facility_id AS copied_facility_id,
+  src.keycloak_role_id AS source_keycloak_role_id,
+  copied.keycloak_role_id AS copied_keycloak_role_id,
+  src.keycloak_role_name AS source_keycloak_role_name,
+  copied.keycloak_role_name AS copied_keycloak_role_name,
+  src.deleted_at AS source_deleted_at,
+  copied.created_at AS copied_created_at,
+  copied.updated_at AS copied_updated_at,
+  copied.deleted_at AS copied_deleted_at
+FROM facility_role_permission src
+JOIN facility_role_permission copied
+  ON copied.facility_id = <response_facility_id>
+ AND copied.permission_id = src.permission_id
+ AND COALESCE(copied.keycloak_role_id, copied.keycloak_role_name)
+     = COALESCE(src.keycloak_role_id, src.keycloak_role_name)
+WHERE src.facility_id = <source_facility_id>
+  AND src.deleted_at IS NULL
+  AND copied.deleted_at IS NULL
+ORDER BY src.permission_id,
+         COALESCE(src.keycloak_role_id, src.keycloak_role_name);
+
+Expected:
+copied_facility_role_permission_id <> source_facility_role_permission_id
+copied_permission_id = source_permission_id
+copied_facility_id = <response_facility_id>
+copied_keycloak_role_id = source_keycloak_role_id
+copied_keycloak_role_name = source_keycloak_role_name
+copied_created_at is POST time
+copied_updated_at is POST time
+copied_deleted_at = source_deleted_at, normally NULL
+
+Count check:
+
+SELECT
+  (SELECT COUNT(*)
+   FROM facility_role_permission
+   WHERE facility_id = <source_facility_id>
+     AND deleted_at IS NULL) AS source_role_count,
+  (SELECT COUNT(*)
+   FROM facility_role_permission
+   WHERE facility_id = <response_facility_id>
+     AND deleted_at IS NULL) AS copied_role_count;
+
+Expected:
+copied_role_count = source_role_count
+
+1-4-79 to 1-4-88: equipments.
+
+SELECT
+  src.equipment_id AS source_equipment_id,
+  copied.equipment_id AS copied_equipment_id,
+  src.equipment_master_id AS source_equipment_master_id,
+  copied.equipment_master_id AS copied_equipment_master_id,
+  src.yaw AS source_yaw,
+  copied.yaw AS copied_yaw,
+  src.pitch AS source_pitch,
+  copied.pitch AS copied_pitch,
+  copied.facility_id AS copied_facility_id,
+  copied.created_at,
+  copied.updated_at,
+  copied.deleted_at
+FROM equipments src
+JOIN equipments copied
+  ON copied.facility_id = <response_facility_id>
+ AND copied.equipment_master_id = src.equipment_master_id
+WHERE src.facility_id = 1100
+  AND src.deleted_at IS NULL
+  AND copied.deleted_at IS NULL;
+
+Expected:
+copied equipment_id is new
+copied_facility_id = <response_facility_id>
+equipment_master_id/yaw/pitch match source
+created_at and updated_at are POST time
+deleted_at matches source, normally NULL
+
+One-query verification for Excel 1-4-79 to 1-4-88:
+
+Replace:
+<source_facility_id> with 1100
+<response_facility_id> with the copied facility_id returned by Postman
+
+Example:
+If Postman response data.facility_id = 2234594, replace <response_facility_id> with 2234594.
+
+SQL:
+
+SELECT
+  src.equipment_id AS source_equipment_id,
+  copied.equipment_id AS copied_equipment_id,
+  src.facility_id AS source_facility_id,
+  copied.facility_id AS copied_facility_id,
+  src.equipment_master_id AS source_equipment_master_id,
+  copied.equipment_master_id AS copied_equipment_master_id,
+  src.yaw AS source_yaw,
+  copied.yaw AS copied_yaw,
+  src.pitch AS source_pitch,
+  copied.pitch AS copied_pitch,
+  src.deleted_at AS source_deleted_at,
+  copied.created_at AS copied_created_at,
+  copied.updated_at AS copied_updated_at,
+  copied.deleted_at AS copied_deleted_at
+FROM equipments src
+JOIN equipments copied
+  ON copied.facility_id = <response_facility_id>
+ AND copied.equipment_master_id = src.equipment_master_id
+ AND copied.yaw IS NOT DISTINCT FROM src.yaw
+ AND copied.pitch IS NOT DISTINCT FROM src.pitch
+WHERE src.facility_id = <source_facility_id>
+  AND src.deleted_at IS NULL
+  AND copied.deleted_at IS NULL
+ORDER BY src.equipment_id;
+
+Expected:
+copied_equipment_id <> source_equipment_id
+copied_facility_id = <response_facility_id>
+copied_equipment_master_id = source_equipment_master_id
+copied_yaw = source_yaw
+copied_pitch = source_pitch
+copied_created_at is POST time
+copied_updated_at is POST time
+copied_deleted_at = source_deleted_at, normally NULL
+
+Count check:
+
+SELECT
+  (SELECT COUNT(*)
+   FROM equipments
+   WHERE facility_id = <source_facility_id>
+     AND deleted_at IS NULL) AS source_equipment_count,
+  (SELECT COUNT(*)
+   FROM equipments
+   WHERE facility_id = <response_facility_id>
+     AND deleted_at IS NULL) AS copied_equipment_count;
+
+Expected:
+copied_equipment_count = source_equipment_count
+
+1-4-89: annotations are not copied.
+
+SELECT COUNT(*) AS copied_root_annotations_count
+FROM annotations
+WHERE facility_id = <response_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+copied_root_annotations_count = 0
+
+Also confirm total annotations count did not change:
+
+SELECT COUNT(*) AS annotations_count_after FROM annotations;
+
+Expected:
+annotations_count_after = annotations_count_before
+
+One-query verification for Excel 1-4-89:
+
+Replace:
+<response_facility_id> with the copied facility_id returned by Postman
+
+SQL:
+
+SELECT
+  (SELECT COUNT(*)
+   FROM annotations
+   WHERE facility_id = <response_facility_id>
+     AND deleted_at IS NULL) AS copied_root_annotations_count,
+  (SELECT COUNT(*)
+   FROM annotations) AS annotations_count_after;
+
+Expected:
+copied_root_annotations_count = 0
+annotations_count_after = annotations_count_before saved before Postman
+
+Check no annotations row was updated at the same time as copied facility creation:
+
+SELECT a.annotation_id, a.facility_id, a.created_at, a.updated_at, a.deleted_at
+FROM annotations a
+JOIN facilities_tree copied
+  ON copied.facility_id = <response_facility_id>
+WHERE a.created_at = copied.created_at
+   OR a.updated_at = copied.updated_at;
+
+Expected:
+0 rows.
+
+1-4-90 to 1-4-97: children and descendants are copied.
+
+Compare source tree and copied tree:
+
+WITH RECURSIVE source_tree AS (
+  SELECT facility_id, parent_id, facility_name, sort_order, tree_level
+  FROM facilities_tree
+  WHERE facility_id = 1100
+  UNION ALL
+  SELECT child.facility_id, child.parent_id, child.facility_name, child.sort_order, child.tree_level
+  FROM facilities_tree child
+  JOIN source_tree parent
+    ON child.parent_id = parent.facility_id
+  WHERE child.deleted_at IS NULL
+),
+copied_tree AS (
+  SELECT facility_id, parent_id, facility_name, sort_order, tree_level
+  FROM facilities_tree
+  WHERE facility_id = <response_facility_id>
+  UNION ALL
+  SELECT child.facility_id, child.parent_id, child.facility_name, child.sort_order, child.tree_level
+  FROM facilities_tree child
+  JOIN copied_tree parent
+    ON child.parent_id = parent.facility_id
+  WHERE child.deleted_at IS NULL
+)
+SELECT
+  source_tree.facility_name,
+  source_tree.sort_order AS source_sort_order,
+  copied_tree.sort_order AS copied_sort_order,
+  source_tree.tree_level AS source_tree_level,
+  copied_tree.tree_level AS copied_tree_level
+FROM source_tree
+JOIN copied_tree
+  ON copied_tree.facility_name = source_tree.facility_name
+ORDER BY source_tree.facility_id;
+
+Expected:
+Every source child/descendant facility name appears in the copied tree.
+Copied facility IDs are new.
+Child/descendant related table rows are copied where source rows exist.
+Child/descendant annotations are not copied.
+Files linked by child/descendant facility_images/maps are copied as new FILES rows.
+
+Check child/descendant related counts:
+
+WITH RECURSIVE copied_tree AS (
+  SELECT facility_id
+  FROM facilities_tree
+  WHERE facility_id = <response_facility_id>
+  UNION ALL
+  SELECT child.facility_id
+  FROM facilities_tree child
+  JOIN copied_tree parent
+    ON child.parent_id = parent.facility_id
+  WHERE child.deleted_at IS NULL
+)
+SELECT
+  COUNT(DISTINCT fi.image_id) AS copied_tree_vr_image_count,
+  COUNT(DISTINCT m.map_id) AS copied_tree_map_count,
+  COUNT(DISTINCT mp.map_point_id) AS copied_tree_map_point_count,
+  COUNT(DISTINCT frp.facility_role_permission_id) AS copied_tree_role_count,
+  COUNT(DISTINCT e.equipment_id) AS copied_tree_equipment_count,
+  COUNT(DISTINCT a.annotation_id) AS copied_tree_annotation_count
+FROM copied_tree ct
+LEFT JOIN facility_images fi
+  ON fi.facility_id = ct.facility_id
+ AND fi.deleted_at IS NULL
+LEFT JOIN maps m
+  ON m.facility_id = ct.facility_id
+ AND m.deleted_at IS NULL
+LEFT JOIN map_points mp
+  ON mp.target_id = ct.facility_id
+ AND mp.deleted_at IS NULL
+LEFT JOIN facility_role_permission frp
+  ON frp.facility_id = ct.facility_id
+ AND frp.deleted_at IS NULL
+LEFT JOIN equipments e
+  ON e.facility_id = ct.facility_id
+ AND e.deleted_at IS NULL
+LEFT JOIN annotations a
+  ON a.facility_id = ct.facility_id
+ AND a.deleted_at IS NULL;
+
+Expected:
+Related counts exist where source had related data.
+copied_tree_annotation_count = 0
+
+Check copied files for the whole copied tree:
+
+WITH RECURSIVE copied_tree AS (
+  SELECT facility_id
+  FROM facilities_tree
+  WHERE facility_id = <response_facility_id>
+  UNION ALL
+  SELECT child.facility_id
+  FROM facilities_tree child
+  JOIN copied_tree parent
+    ON child.parent_id = parent.facility_id
+  WHERE child.deleted_at IS NULL
+),
+copied_file_ids AS (
+  SELECT file_id
+  FROM facility_images
+  WHERE facility_id IN (SELECT facility_id FROM copied_tree)
+    AND deleted_at IS NULL
+  UNION
+  SELECT file_id
+  FROM maps
+  WHERE facility_id IN (SELECT facility_id FROM copied_tree)
+    AND deleted_at IS NULL
+)
+SELECT f.*
+FROM files f
+WHERE f.file_id IN (SELECT file_id FROM copied_file_ids)
+ORDER BY f.file_id;
+
+Expected:
+Copied FILES rows exist for copied facility_images/maps.
+Copied FILES file_id values are new.
 
 1. Find a valid copy source facility.
 
@@ -3097,6 +4219,171 @@ Condition:
 5. The requested parent_id must have at least two child facilities.
 
 
+Concrete setup SQL for Case 1-5 / 1-6 / 1-7 / 1-8:
+
+Purpose:
+Create a clean source facility that has no related table rows and no child facilities.
+Create a destination parent that has two child facilities, so target_facility_id can be the first child and the copied facility can be placed between the first and second children.
+
+Prepared IDs:
+<source_facility_id_no_related_data> = 9100500
+<source_current_parent_id> = 9100100
+<between_parent_id> = 9100200
+<first_target_facility_id> = 9100300
+<second_target_facility_id> = 9100400
+
+SQL:
+
+BEGIN;
+
+INSERT INTO facilities_tree (
+  facility_id, parent_id, facility_name, sort_order, tree_level, is_leaf,
+  public_flag, outer_flag, facility_description, authority_setting_flg,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9100000, NULL, 'copy_between_test_root', 91000000, 1, FALSE, '01', FALSE, 'copy between test root', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9100100, 9100000, 'copy_between_source_parent', 10000000, 2, FALSE, '01', FALSE, 'source current parent', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9100200, 9100000, 'copy_between_destination_parent', 20000000, 2, FALSE, '01', FALSE, 'destination parent', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9100300, 9100200, 'copy_between_target_first', 10000000, 3, TRUE, '01', FALSE, 'first target child', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9100400, 9100200, 'copy_between_target_second', 20000000, 3, TRUE, '01', FALSE, 'second target child', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9100500, 9100100, 'copy_between_clean_source', 10000000, 3, TRUE, '01', FALSE, 'clean source no related data', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (facility_id) DO UPDATE
+SET parent_id = EXCLUDED.parent_id,
+    facility_name = EXCLUDED.facility_name,
+    sort_order = EXCLUDED.sort_order,
+    tree_level = EXCLUDED.tree_level,
+    is_leaf = EXCLUDED.is_leaf,
+    public_flag = EXCLUDED.public_flag,
+    outer_flag = EXCLUDED.outer_flag,
+    facility_description = EXCLUDED.facility_description,
+    authority_setting_flg = EXCLUDED.authority_setting_flg,
+    updated_at = CURRENT_TIMESTAMP,
+    deleted_at = NULL;
+
+UPDATE facilities_tree
+SET deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE parent_id = 9100500
+  AND deleted_at IS NULL;
+
+UPDATE facility_images
+SET deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE facility_id = 9100500
+  AND deleted_at IS NULL;
+
+UPDATE maps
+SET deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE facility_id = 9100500
+  AND deleted_at IS NULL;
+
+UPDATE map_points
+SET deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE (facility_id = 9100500 OR target_id = 9100500)
+  AND deleted_at IS NULL;
+
+UPDATE facility_role_permission
+SET deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE facility_id = 9100500
+  AND deleted_at IS NULL;
+
+UPDATE equipments
+SET deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE facility_id = 9100500
+  AND deleted_at IS NULL;
+
+UPDATE annotations
+SET deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE facility_id = 9100500
+  AND deleted_at IS NULL;
+
+SELECT setval(
+  pg_get_serial_sequence('facilities_tree', 'facility_id'),
+  COALESCE((SELECT MAX(facility_id) FROM facilities_tree), 1),
+  true
+);
+
+COMMIT;
+
+
+Concrete setup check SQL:
+
+SELECT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  COUNT(DISTINCT child.facility_id) AS child_count,
+  COUNT(DISTINCT fi.image_id) AS image_count,
+  COUNT(DISTINCT m.map_id) AS map_count,
+  COUNT(DISTINCT mp1.map_point_id) AS map_point_as_facility_count,
+  COUNT(DISTINCT mp2.map_point_id) AS map_point_as_target_count,
+  COUNT(DISTINCT frp.facility_role_permission_id) AS role_count,
+  COUNT(DISTINCT e.equipment_id) AS equipment_count,
+  COUNT(DISTINCT a.annotation_id) AS annotation_count
+FROM facilities_tree ft
+LEFT JOIN facilities_tree child
+  ON child.parent_id = ft.facility_id
+ AND child.deleted_at IS NULL
+LEFT JOIN facility_images fi
+  ON fi.facility_id = ft.facility_id
+ AND fi.deleted_at IS NULL
+LEFT JOIN maps m
+  ON m.facility_id = ft.facility_id
+ AND m.deleted_at IS NULL
+LEFT JOIN map_points mp1
+  ON mp1.facility_id = ft.facility_id
+ AND mp1.deleted_at IS NULL
+LEFT JOIN map_points mp2
+  ON mp2.target_id = ft.facility_id
+ AND mp2.deleted_at IS NULL
+LEFT JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.deleted_at IS NULL
+LEFT JOIN equipments e
+  ON e.facility_id = ft.facility_id
+ AND e.deleted_at IS NULL
+LEFT JOIN annotations a
+  ON a.facility_id = ft.facility_id
+ AND a.deleted_at IS NULL
+WHERE ft.facility_id = 9100500
+  AND ft.deleted_at IS NULL
+GROUP BY ft.facility_id, ft.parent_id, ft.facility_name;
+
+Expected:
+facility_id = 9100500
+parent_id = 9100100
+child_count = 0
+image_count = 0
+map_count = 0
+map_point_as_facility_count = 0
+map_point_as_target_count = 0
+role_count = 0
+equipment_count = 0
+annotation_count = 0
+
+Confirm destination parent has first and second target children:
+
+SELECT facility_id, parent_id, facility_name, sort_order
+FROM facilities_tree
+WHERE parent_id = 9100200
+  AND deleted_at IS NULL
+ORDER BY facility_id;
+
+Expected:
+First row:
+facility_id = 9100300
+sort_order = 10000000
+
+Second row:
+facility_id = 9100400
+sort_order = 20000000
+
+
 Find a source facility with no related data and no children:
 
 SELECT ft.facility_id, ft.parent_id, ft.facility_name
@@ -3123,7 +4410,7 @@ WHERE ft.deleted_at IS NULL
   AND NOT EXISTS (
       SELECT 1
       FROM map_points mp
-      WHERE mp.facility_id = ft.facility_id
+      WHERE (mp.facility_id = ft.facility_id OR mp.target_id = ft.facility_id)
         AND mp.deleted_at IS NULL
   )
   AND NOT EXISTS (
@@ -3209,6 +4496,55 @@ Body:
   "parent_id": <between_parent_id>,
   "target_facility_id": <first_target_facility_id>
 }
+
+Concrete Postman example using inserted Case 1-5 data:
+
+POST http://localhost:8081/facilities/9100500/copy
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "parent_id": 9100200,
+  "target_facility_id": 9100300
+}
+
+Before sending Postman, save count values for DB 1-8 no-related checks:
+
+SELECT COUNT(*) AS facilities_tree_count_before FROM facilities_tree;
+SELECT COUNT(*) AS files_count_before FROM files;
+SELECT COUNT(*) AS facility_images_count_before FROM facility_images;
+SELECT COUNT(*) AS maps_count_before FROM maps;
+SELECT COUNT(*) AS map_points_count_before FROM map_points;
+SELECT COUNT(*) AS facility_role_permission_count_before FROM facility_role_permission;
+SELECT COUNT(*) AS equipments_count_before FROM equipments;
+SELECT COUNT(*) AS annotations_count_before FROM annotations;
+
+Before sending Postman, save target and next sort_order:
+
+SELECT facility_id, parent_id, sort_order
+FROM facilities_tree
+WHERE facility_id = 9100300
+  AND parent_id = 9100200
+  AND deleted_at IS NULL;
+
+SELECT facility_id, parent_id, sort_order
+FROM facilities_tree
+WHERE parent_id = 9100200
+  AND facility_id > 9100300
+  AND deleted_at IS NULL
+ORDER BY facility_id ASC
+LIMIT 1;
+
+Expected:
+target sort_order = 10000000
+next sort_order = 20000000
+expected copied sort_order = 15000000
+
+After Postman success, save response data.facility_id as:
+<response_facility_id>
 
 
 Case 1-6: Response
@@ -3390,6 +4726,86 @@ WHERE facility_id = <response_facility_id>
 Expected:
 All counts = 0.
 
+One-query verification for Case 1-7 and Case 1-8 using inserted data:
+
+Replace:
+<response_facility_id> with the copied facility_id returned by Postman.
+
+SQL:
+
+SELECT
+  copied.facility_id AS copied_facility_id,
+  copied.parent_id AS copied_parent_id,
+  copied.sort_order AS copied_sort_order,
+  target.sort_order AS target_sort_order,
+  next_child.sort_order AS next_sort_order,
+  ((target.sort_order + next_child.sort_order) / 2) AS expected_sort_order,
+  copied.facility_name,
+  copied.facility_description,
+  copied.tree_level,
+  parent.tree_level + 1 AS expected_tree_level,
+  copied.is_leaf,
+  copied.public_flag,
+  copied.outer_flag,
+  copied.authority_setting_flg,
+  copied.created_at,
+  copied.updated_at,
+  copied.deleted_at,
+  (SELECT COUNT(*) FROM facilities_tree child
+   WHERE child.parent_id = copied.facility_id
+     AND child.deleted_at IS NULL) AS copied_child_count,
+  (SELECT COUNT(*) FROM facility_images
+   WHERE facility_id = copied.facility_id
+     AND deleted_at IS NULL) AS copied_image_count,
+  (SELECT COUNT(*) FROM maps
+   WHERE facility_id = copied.facility_id
+     AND deleted_at IS NULL) AS copied_map_count,
+  (SELECT COUNT(*) FROM map_points
+   WHERE (facility_id = copied.facility_id OR target_id = copied.facility_id)
+     AND deleted_at IS NULL) AS copied_map_point_count,
+  (SELECT COUNT(*) FROM facility_role_permission
+   WHERE facility_id = copied.facility_id
+     AND deleted_at IS NULL) AS copied_role_count,
+  (SELECT COUNT(*) FROM equipments
+   WHERE facility_id = copied.facility_id
+     AND deleted_at IS NULL) AS copied_equipment_count,
+  (SELECT COUNT(*) FROM annotations
+   WHERE facility_id = copied.facility_id
+     AND deleted_at IS NULL) AS copied_annotation_count
+FROM facilities_tree copied
+JOIN facilities_tree parent
+  ON parent.facility_id = copied.parent_id
+JOIN facilities_tree target
+  ON target.facility_id = 9100300
+ AND target.parent_id = 9100200
+ AND target.deleted_at IS NULL
+JOIN LATERAL (
+  SELECT facility_id, sort_order
+  FROM facilities_tree
+  WHERE parent_id = 9100200
+    AND facility_id > 9100300
+    AND deleted_at IS NULL
+  ORDER BY facility_id ASC
+  LIMIT 1
+) next_child ON true
+WHERE copied.facility_id = <response_facility_id>
+  AND copied.deleted_at IS NULL;
+
+Expected for Case 1-7:
+copied_parent_id = 9100200
+copied_sort_order = expected_sort_order = 15000000
+updated_at is POST time
+
+Expected for Case 1-8:
+copied_child_count = 0
+copied_image_count = 0
+copied_map_count = 0
+copied_map_point_count = 0
+copied_role_count = 0
+copied_equipment_count = 0
+copied_annotation_count = 0
+deleted_at IS NULL
+
 FILES table check:
 Because the source has no facility_images or maps, no new FILES row should be created by this copy.
 
@@ -3419,6 +4835,97 @@ Copy a facility and place the copied facility after the last existing child unde
 Condition:
 1. parent_id must be different from the source facility's current parent_id.
 2. target_facility_id must be the last facility_id under the requested parent_id.
+
+
+Concrete setup SQL for Case 1-9 / 1-10 / 1-11:
+
+Purpose:
+Create a source facility and a destination parent with at least one child.
+The destination child with the largest facility_id is used as target_facility_id.
+The copied facility should be inserted after that target, so the expected sort_order is:
+target SORT_ORDER + 10000000
+
+Prepared IDs:
+<last_copy_source_facility_id> = 9200500
+<last_copy_source_current_parent_id> = 9200100
+<last_copy_parent_id> = 9200200
+<last_target_facility_id> = 9200400
+
+SQL:
+
+BEGIN;
+
+INSERT INTO facilities_tree (
+  facility_id, parent_id, facility_name, sort_order, tree_level, is_leaf,
+  public_flag, outer_flag, facility_description, authority_setting_flg,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9200000, NULL, 'copy_last_test_root', 92000000, 1, FALSE, '01', FALSE, 'copy last test root', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9200100, 9200000, 'copy_last_source_parent', 10000000, 2, FALSE, '01', FALSE, 'source current parent', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9200200, 9200000, 'copy_last_destination_parent', 20000000, 2, FALSE, '01', FALSE, 'destination parent', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9200300, 9200200, 'copy_last_existing_first', 10000000, 3, TRUE, '01', FALSE, 'existing first child', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9200400, 9200200, 'copy_last_existing_last', 20000000, 3, TRUE, '01', FALSE, 'existing last child', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9200500, 9200100, 'copy_last_source', 10000000, 3, TRUE, '01', FALSE, 'source facility for last copy', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (facility_id) DO UPDATE
+SET parent_id = EXCLUDED.parent_id,
+    facility_name = EXCLUDED.facility_name,
+    sort_order = EXCLUDED.sort_order,
+    tree_level = EXCLUDED.tree_level,
+    is_leaf = EXCLUDED.is_leaf,
+    public_flag = EXCLUDED.public_flag,
+    outer_flag = EXCLUDED.outer_flag,
+    facility_description = EXCLUDED.facility_description,
+    authority_setting_flg = EXCLUDED.authority_setting_flg,
+    updated_at = CURRENT_TIMESTAMP,
+    deleted_at = NULL;
+
+SELECT setval(
+  pg_get_serial_sequence('facilities_tree', 'facility_id'),
+  COALESCE((SELECT MAX(facility_id) FROM facilities_tree), 1),
+  true
+);
+
+COMMIT;
+
+
+Concrete setup check SQL:
+
+SELECT facility_id, parent_id, facility_name, sort_order, deleted_at
+FROM facilities_tree
+WHERE facility_id IN (9200100, 9200200, 9200300, 9200400, 9200500)
+ORDER BY facility_id;
+
+Expected:
+9200500 exists and parent_id = 9200100.
+9200200 exists as destination parent.
+9200300 and 9200400 exist under parent_id = 9200200.
+9200400 is the last target by facility_id DESC.
+
+Check target SQL from Excel:
+
+SELECT facility_id, parent_id, sort_order
+FROM facilities_tree
+WHERE parent_id = 9200200
+  AND deleted_at IS NULL
+ORDER BY facility_id DESC;
+
+Expected:
+First row is:
+facility_id = 9200400
+sort_order = 20000000
+
+Confirm there is no next facility after target 9200400:
+
+SELECT facility_id, parent_id, sort_order
+FROM facilities_tree
+WHERE parent_id = 9200200
+  AND facility_id > 9200400
+  AND deleted_at IS NULL
+ORDER BY facility_id ASC
+LIMIT 1;
+
+Expected:
+0 rows.
 
 
 Find a source facility:
@@ -3489,6 +4996,35 @@ Body:
   "parent_id": <last_copy_parent_id>,
   "target_facility_id": <last_target_facility_id>
 }
+
+Concrete Postman example using inserted Case 1-9 data:
+
+POST http://localhost:8081/facilities/9200500/copy
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "parent_id": 9200200,
+  "target_facility_id": 9200400
+}
+
+Before sending Postman, save target sort_order:
+
+SELECT facility_id, parent_id, sort_order
+FROM facilities_tree
+WHERE facility_id = 9200400
+  AND parent_id = 9200200
+  AND deleted_at IS NULL;
+
+Expected:
+target sort_order = 20000000
+expected copied sort_order = 30000000
+
+After Postman success, save response data.facility_id as:
+<response_facility_id>
 
 
 Case 1-10: Response
@@ -3607,6 +5143,62 @@ WHERE facility_id = <response_facility_id>
 
 Expected:
 updated_at is close to the time when the Postman request was executed.
+
+One-query verification for Case 1-10 and Case 1-11 using inserted data:
+
+Replace:
+<response_facility_id> with the copied facility_id returned by Postman.
+
+SQL:
+
+SELECT
+  copied.facility_id AS copied_facility_id,
+  copied.parent_id AS copied_parent_id,
+  copied.sort_order AS copied_sort_order,
+  target.facility_id AS target_facility_id,
+  target.sort_order AS target_sort_order,
+  (target.sort_order + 10000000) AS expected_sort_order,
+  copied.facility_name,
+  copied.facility_description,
+  copied.tree_level,
+  parent.tree_level + 1 AS expected_tree_level,
+  copied.is_leaf,
+  copied.public_flag,
+  copied.outer_flag,
+  copied.authority_setting_flg,
+  copied.created_at,
+  copied.updated_at,
+  copied.deleted_at,
+  (
+    SELECT COUNT(*)
+    FROM facilities_tree next_child
+    WHERE next_child.parent_id = 9200200
+      AND next_child.facility_id > 9200400
+      AND next_child.facility_id <> copied.facility_id
+      AND next_child.deleted_at IS NULL
+  ) AS original_next_child_count
+FROM facilities_tree copied
+JOIN facilities_tree parent
+  ON parent.facility_id = copied.parent_id
+JOIN facilities_tree target
+  ON target.facility_id = 9200400
+ AND target.parent_id = 9200200
+ AND target.deleted_at IS NULL
+WHERE copied.facility_id = <response_facility_id>
+  AND copied.deleted_at IS NULL;
+
+Expected for Case 1-10:
+One row is returned for <response_facility_id>.
+copied_facility_id is different from 9200500.
+
+Expected for Case 1-11:
+copied_parent_id = 9200200
+target_facility_id = 9200400
+target_sort_order = 20000000
+copied_sort_order = expected_sort_order = 30000000
+original_next_child_count = 0
+updated_at is POST time
+deleted_at IS NULL
 
 
 Quick Checklist

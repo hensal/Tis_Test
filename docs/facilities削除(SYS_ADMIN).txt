@@ -1,0 +1,609 @@
+facilities削除(SYS_ADMIN) Postman Test Steps
+
+Source Excel:
+/Users/hensal/Desktop/JAVA_SPRING_BOOT/TEST_CASE/facilities/APIテスト仕様書(facilities).xlsx
+Sheet: facilities削除(SYS_ADMIN)
+
+Source Markdown:
+/Users/hensal/Desktop/JAVA_SPRING_BOOT/TEST_CASE/facilities/facilities.md
+
+
+Endpoint Note
+
+Excel title says:
+POST /facilities/{facilityid}
+
+facilities.md says:
+DELETE /facilities/{facilityId}
+
+Current backend supports both:
+
+POST http://localhost:8081/facilities/<facilityId>
+DELETE http://localhost:8081/facilities/<facilityId>
+
+For Excel testing, use POST.
+For REST API testing, DELETE is also valid.
+
+
+Common Postman Setup
+
+Base URL:
+http://localhost:8081
+
+Portable setup for any computer:
+If the backend runs on another host or port, replace http://localhost:8081.
+Always run the SQL in this document on the target computer's DB first.
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Body:
+No body is required.
+Excel says all body request parameters are ignored.
+
+
+Before Testing: Find IDs
+
+1. Find an active facility.
+
+SELECT facility_id, parent_id, facility_name, deleted_at
+FROM facilities_tree
+WHERE deleted_at IS NULL
+ORDER BY facility_id;
+
+
+2. Find a non-existing facility ID.
+
+SELECT COALESCE(MAX(facility_id), 0) + 999999 AS non_existing_facility_id
+FROM facilities_tree;
+
+Use this as:
+<non_existing_facility_id>
+
+
+3. Find a full delete target with children, grandchildren, and related data.
+
+SELECT
+  p.facility_id,
+  p.facility_name,
+  COUNT(DISTINCT child.facility_id) AS child_count,
+  COUNT(DISTINCT grandchild.facility_id) AS grandchild_count,
+  COUNT(DISTINCT frp.facility_role_permission_id) AS role_count,
+  COUNT(DISTINCT fi.image_id) AS image_count,
+  COUNT(DISTINCT m.map_id) AS map_count,
+  COUNT(DISTINCT mp.map_point_id) AS map_point_count,
+  COUNT(DISTINCT e.equipment_id) AS equipment_count,
+  COUNT(DISTINCT a.annotation_id) AS annotation_count
+FROM facilities_tree p
+LEFT JOIN facilities_tree child
+  ON child.parent_id = p.facility_id
+ AND child.deleted_at IS NULL
+LEFT JOIN facilities_tree grandchild
+  ON grandchild.parent_id = child.facility_id
+ AND grandchild.deleted_at IS NULL
+LEFT JOIN facility_role_permission frp
+  ON frp.facility_id = p.facility_id
+ AND frp.deleted_at IS NULL
+LEFT JOIN facility_images fi
+  ON fi.facility_id = p.facility_id
+ AND fi.deleted_at IS NULL
+LEFT JOIN maps m
+  ON m.facility_id = p.facility_id
+ AND m.deleted_at IS NULL
+LEFT JOIN map_points mp
+  ON mp.facility_id = p.facility_id
+ AND mp.deleted_at IS NULL
+LEFT JOIN equipments e
+  ON e.facility_id = p.facility_id
+ AND e.deleted_at IS NULL
+LEFT JOIN annotations a
+  ON a.facility_id = p.facility_id
+ AND a.deleted_at IS NULL
+WHERE p.deleted_at IS NULL
+GROUP BY p.facility_id, p.facility_name
+HAVING COUNT(DISTINCT child.facility_id) > 0
+   AND COUNT(DISTINCT grandchild.facility_id) > 0
+ORDER BY p.facility_id;
+
+Use one facility_id as:
+<full_delete_facility_id>
+
+
+4. Find a simple delete target with no children or grandchildren.
+
+SELECT ft.facility_id, ft.parent_id, ft.facility_name
+FROM facilities_tree ft
+WHERE ft.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM facilities_tree child
+      WHERE child.parent_id = ft.facility_id
+        AND child.deleted_at IS NULL
+  )
+ORDER BY ft.facility_id;
+
+Use one facility_id as:
+<simple_delete_facility_id>
+
+
+Before Delete: Save Target/Descendant IDs
+
+For full delete target:
+
+WITH RECURSIVE targets AS (
+    SELECT facility_id, parent_id, facility_name
+    FROM facilities_tree
+    WHERE facility_id = <full_delete_facility_id>
+      AND deleted_at IS NULL
+    UNION ALL
+    SELECT child.facility_id, child.parent_id, child.facility_name
+    FROM facilities_tree child
+    JOIN targets parent
+      ON child.parent_id = parent.facility_id
+    WHERE child.deleted_at IS NULL
+)
+SELECT *
+FROM targets
+ORDER BY facility_id;
+
+Use the returned IDs as:
+<target_facility_ids>
+
+
+Before Delete: Save Related IDs
+
+Run these before sending the delete request.
+
+Facility role permissions:
+
+SELECT *
+FROM facility_role_permission
+WHERE facility_id IN (<target_facility_ids>)
+  AND deleted_at IS NULL;
+
+Annotations:
+
+SELECT *
+FROM annotations
+WHERE facility_id IN (<target_facility_ids>)
+  AND deleted_at IS NULL;
+
+Annotation files:
+
+SELECT af.*
+FROM annotation_files af
+JOIN annotations a
+  ON a.annotation_id = af.annotation_id
+WHERE a.facility_id IN (<target_facility_ids>);
+
+Annotation linked files:
+
+SELECT f.*
+FROM files f
+JOIN annotation_files af
+  ON af.file_id = f.file_id
+JOIN annotations a
+  ON a.annotation_id = af.annotation_id
+WHERE a.facility_id IN (<target_facility_ids>)
+  AND f.deleted_at IS NULL;
+
+Annotation comments:
+
+SELECT ac.*
+FROM annotation_comments ac
+JOIN annotations a
+  ON a.annotation_id = ac.annotation_id
+WHERE a.facility_id IN (<target_facility_ids>)
+  AND ac.deleted_at IS NULL;
+
+Facility images:
+
+SELECT *
+FROM facility_images
+WHERE facility_id IN (<target_facility_ids>)
+  AND deleted_at IS NULL;
+
+Image hotspots:
+
+SELECT h.*
+FROM hotspots h
+JOIN facility_images fi
+  ON fi.image_id = h.image_id
+WHERE fi.facility_id IN (<target_facility_ids>)
+  AND h.deleted_at IS NULL;
+
+Image files:
+
+SELECT f.*
+FROM files f
+JOIN facility_images fi
+  ON fi.file_id = f.file_id
+WHERE fi.facility_id IN (<target_facility_ids>)
+  AND f.deleted_at IS NULL;
+
+Equipments:
+
+SELECT *
+FROM equipments
+WHERE facility_id IN (<target_facility_ids>)
+  AND deleted_at IS NULL;
+
+Map points:
+
+SELECT *
+FROM map_points
+WHERE (facility_id IN (<target_facility_ids>) OR target_id IN (<target_facility_ids>))
+  AND deleted_at IS NULL;
+
+Maps:
+
+SELECT *
+FROM maps
+WHERE facility_id IN (<target_facility_ids>)
+  AND deleted_at IS NULL;
+
+Map files:
+
+SELECT f.*
+FROM files f
+JOIN maps m
+  ON m.file_id = f.file_id
+WHERE m.facility_id IN (<target_facility_ids>)
+  AND f.deleted_at IS NULL;
+
+
+Case 1-1-1: No token
+
+POST http://localhost:8081/facilities/<full_delete_facility_id>
+
+Do not send Authorization header.
+
+Expected:
+{
+  "success": false,
+  "error_code": "invalid_token",
+  "message": "認証情報が不正です",
+  "errors": null,
+  "data": null
+}
+
+
+Case 1-1-2: Invalid token
+
+POST http://localhost:8081/facilities/<full_delete_facility_id>
+
+Headers:
+Authorization: Bearer invalid_token
+
+Expected:
+invalid_token error response.
+
+
+Case 1-1-3: Valid access token
+
+POST http://localhost:8081/facilities/<full_delete_facility_id>
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Expected:
+Normal delete response.
+
+Expected response:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "errors": null,
+  "data": null
+}
+
+
+Case 1-1-4: Refresh token sent as bearer token
+
+POST http://localhost:8081/facilities/<full_delete_facility_id>
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_REFRESH_TOKEN>
+
+Expected by Excel:
+Normal delete response.
+
+Expected by current backend:
+invalid_token.
+
+Note:
+Spring Security resource-server APIs normally accept access tokens, not refresh tokens.
+
+
+Case 1-1-5: facilityid = non-existing facility ID
+
+POST http://localhost:8081/facilities/<non_existing_facility_id>
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Expected by Excel:
+Normal success response with 0 response parameters.
+
+Expected current response:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "errors": null,
+  "data": null
+}
+
+
+Case 1-1-6: facilityid is non-numeric
+
+POST http://localhost:8081/facilities/abc
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Expected:
+invalid_request error response.
+
+
+Case 1-1-7: facilityid is longer than 19 bytes
+
+POST http://localhost:8081/facilities/12345678901234567890
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Expected:
+invalid_request error response.
+
+
+Case 1-2: Delete target has children, grandchildren, and related table data
+
+Postman:
+
+POST http://localhost:8081/facilities/<full_delete_facility_id>
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Body:
+No body. Any body parameters should be ignored.
+
+
+Cases 1-2-2, 1-2-18, 1-2-20: facilities_tree deleted_at
+
+Check target, children, and descendants:
+
+WITH RECURSIVE targets AS (
+    SELECT facility_id, parent_id, facility_name, deleted_at
+    FROM facilities_tree
+    WHERE facility_id = <full_delete_facility_id>
+    UNION ALL
+    SELECT child.facility_id, child.parent_id, child.facility_name, child.deleted_at
+    FROM facilities_tree child
+    JOIN targets parent
+      ON child.parent_id = parent.facility_id
+)
+SELECT *
+FROM targets
+ORDER BY facility_id;
+
+Expected:
+All returned rows have deleted_at IS NOT NULL.
+
+
+Case 1-2-3: facility_role_permission deleted_at
+
+SELECT *
+FROM facility_role_permission
+WHERE facility_id IN (<target_facility_ids>);
+
+Expected:
+Rows linked to target/descendants have deleted_at IS NOT NULL.
+
+
+Case 1-2-4: annotations deleted_at
+
+SELECT *
+FROM annotations
+WHERE facility_id IN (<target_facility_ids>);
+
+Expected:
+Rows linked to target/descendants have deleted_at IS NOT NULL.
+
+
+Case 1-2-5: annotation_files deleted_at
+
+SELECT af.*
+FROM annotation_files af
+JOIN annotations a
+  ON a.annotation_id = af.annotation_id
+WHERE a.facility_id IN (<target_facility_ids>);
+
+Expected by Excel:
+annotation_files deleted_at is set.
+
+Note:
+Some local schemas may not have annotation_files.deleted_at. If the column does not exist, this Excel check requires a schema update.
+
+
+Case 1-2-6: files linked from annotation_files deleted_at
+
+SELECT f.*
+FROM files f
+JOIN annotation_files af
+  ON af.file_id = f.file_id
+JOIN annotations a
+  ON a.annotation_id = af.annotation_id
+WHERE a.facility_id IN (<target_facility_ids>);
+
+Expected:
+files.deleted_at IS NOT NULL.
+
+
+Case 1-2-7: physical annotation files
+
+Expected:
+Physical files are not deleted.
+Only DB files.deleted_at is updated.
+
+
+Case 1-2-8: annotation_comments deleted_at
+
+SELECT ac.*
+FROM annotation_comments ac
+JOIN annotations a
+  ON a.annotation_id = ac.annotation_id
+WHERE a.facility_id IN (<target_facility_ids>);
+
+Expected:
+annotation_comments.deleted_at IS NOT NULL.
+
+
+Case 1-2-9: facility_images deleted_at
+
+SELECT *
+FROM facility_images
+WHERE facility_id IN (<target_facility_ids>);
+
+Expected:
+facility_images.deleted_at IS NOT NULL.
+
+
+Case 1-2-10: hotspots deleted_at
+
+SELECT h.*
+FROM hotspots h
+JOIN facility_images fi
+  ON fi.image_id = h.image_id
+WHERE fi.facility_id IN (<target_facility_ids>);
+
+Expected:
+hotspots.deleted_at IS NOT NULL.
+
+
+Case 1-2-11: files linked from facility_images deleted_at
+
+SELECT f.*
+FROM files f
+JOIN facility_images fi
+  ON fi.file_id = f.file_id
+WHERE fi.facility_id IN (<target_facility_ids>);
+
+Expected:
+files.deleted_at IS NOT NULL.
+
+
+Case 1-2-12: physical facility image files
+
+Expected:
+Physical files are not deleted.
+Only DB files.deleted_at is updated.
+
+
+Case 1-2-13: equipments deleted_at
+
+SELECT *
+FROM equipments
+WHERE facility_id IN (<target_facility_ids>);
+
+Expected:
+equipments.deleted_at IS NOT NULL.
+
+
+Case 1-2-14: map_points deleted_at
+
+SELECT *
+FROM map_points
+WHERE facility_id IN (<target_facility_ids>)
+   OR target_id IN (<target_facility_ids>);
+
+Expected:
+map_points.deleted_at IS NOT NULL.
+
+
+Case 1-2-15: maps deleted_at
+
+SELECT *
+FROM maps
+WHERE facility_id IN (<target_facility_ids>);
+
+Expected:
+maps.deleted_at IS NOT NULL.
+
+
+Case 1-2-16: files linked from maps deleted_at
+
+SELECT f.*
+FROM files f
+JOIN maps m
+  ON m.file_id = f.file_id
+WHERE m.facility_id IN (<target_facility_ids>);
+
+Expected:
+files.deleted_at IS NOT NULL.
+
+
+Case 1-2-17: physical map files
+
+Expected:
+Physical files are not deleted.
+Only DB files.deleted_at is updated.
+
+
+Cases 1-2-19 and 1-2-21: child/descendant related data
+
+Use the same related-table SQL above with <target_facility_ids>.
+
+Expected:
+All related rows for children and descendants are soft-deleted.
+
+
+Case 1-3: Response for full delete
+
+Expected:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "errors": null,
+  "data": null
+}
+
+
+Case 1-4: Delete target has no children/grandchildren
+
+Postman:
+
+POST http://localhost:8081/facilities/<simple_delete_facility_id>
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Expected:
+The target facilities_tree row has deleted_at IS NOT NULL.
+Any related rows that exist for that facility also have deleted_at IS NOT NULL.
+
+
+Case 1-5: Response for simple delete
+
+Expected:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "errors": null,
+  "data": null
+}
+
+
+Quick Checklist
+
+1. Use a fresh SYS_ADMIN access token.
+2. Run the SQL to fetch IDs on the target computer.
+3. Use POST /facilities/{facilityId} for Excel testing.
+4. Save target/descendant IDs before delete.
+5. Send the delete request.
+6. Verify deleted_at on facilities_tree and all related tables.
+7. Confirm physical files are not removed.
