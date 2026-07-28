@@ -1,0 +1,314 @@
+facilitiesコピー(USER_ADMIN） Postman Test Steps
+
+Source Excel:
+/Users/hensal/Desktop/JAVA_SPRING_BOOT/TEST_CASE/facilities/APIテスト仕様書(facilities).xlsx
+Sheet: facilitiesコピー(USER_ADMIN）
+
+Compared sheet:
+facilitiesコピー(SYS_ADMIN）
+
+
+Summary: Difference From SYS_ADMIN
+
+Most copy test cases are the same as facilitiesコピー(SYS_ADMIN）.
+
+The USER_ADMIN sheet has one extra permission test:
+
+1-1-15:
+facility_idの「10:施設編集」ロールを持っていない
+
+Expected:
+If the logged-in USER_ADMIN user does not have permission_id = 10 for the request facility_id,
+the API should return an error response.
+
+Excel SQL:
+
+SELECT COUNT(*)
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = <request_facility_id>
+  AND keycloak_role_id IN (<login_user_role_ids>);
+
+If count = 0, the API should return an error.
+
+
+Current Code Verification
+
+Current code now matches this USER_ADMIN permission requirement.
+
+Reason:
+The copy API now passes Authentication roles to the service and checks edit permission.
+
+Current copy controller:
+
+POST /facilities/{facilityId}/copy
+
+passes:
+
+extractRoleNames(authentication)
+
+Current copy service:
+
+copyFacility(Long facilityId, Map<String, Object> request, Set<String> userRoles)
+
+calls:
+
+ensureEditPermission(facilityId, userRoles)
+
+Therefore:
+1. SYS_ADMIN can copy.
+2. USER_ADMIN can copy only when permission_id = 10 exists for the request facility_id and one of the user's roles.
+3. USER_ADMIN without permission_id = 10 should get permission_denied.
+
+
+Important Endpoint Note
+
+The Excel title says:
+POST /facilities/{facilityid}/move
+
+But this is the copy test sheet.
+In the current backend and facilities.md, the copy endpoint is:
+
+POST /facilities/{facilityId}/copy
+
+Use /copy for Postman copy testing.
+
+
+Common Postman Setup
+
+Portable setup for any computer:
+If the backend runs on another host or port, replace http://localhost:8081 with that computer's backend URL.
+
+Examples:
+http://localhost:8081/facilities/<facilityId>/copy
+http://192.168.1.20:8081/facilities/<facilityId>/copy
+
+Do not hardcode facility IDs from one computer.
+Always run the SQL in this document and in the SYS_ADMIN shared document on the target computer's DB first.
+
+Method:
+POST
+
+Exact endpoint format:
+http://localhost:8081/facilities/<facilityId>/copy
+
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
+
+Normal body:
+{
+  "parent_id": <parent_id>,
+  "target_facility_id": null
+}
+
+
+Before Testing: Find USER_ADMIN Roles
+
+Use the USER_ADMIN access token in jwt.io or your token decoder.
+
+Find the user roles in the JWT claims, usually under:
+
+resource_access
+realm_access
+
+Use the roles that your backend receives after removing the ROLE_ prefix.
+
+Important:
+The Excel says keycloak_role_id, but the current backend compares facility_role_permission.keycloak_role_id
+with the role names extracted from the JWT.
+
+Example:
+If JWT role is:
+ROLE_USER_ADMIN
+
+The backend role name becomes:
+USER_ADMIN
+
+So your DB test value may need to be:
+USER_ADMIN
+
+
+Before Testing: Find A Valid Source Facility
+
+Find an active facility to copy:
+
+SELECT facility_id, parent_id, facility_name
+FROM facilities_tree
+WHERE deleted_at IS NULL
+ORDER BY facility_id;
+
+Use one facility_id as:
+<request_facility_id>
+
+
+Before Testing: Find A Valid Destination Parent
+
+Find another active facility to use as parent_id:
+
+SELECT facility_id, parent_id, facility_name
+FROM facilities_tree
+WHERE deleted_at IS NULL
+  AND facility_id <> <request_facility_id>
+ORDER BY facility_id;
+
+Use one facility_id as:
+<valid_parent_id>
+
+
+Case 1-1-15: USER_ADMIN does not have facility edit permission
+
+Purpose:
+Confirm USER_ADMIN cannot copy a facility unless the user has permission_id = 10 for that request facility_id.
+
+Step 1: Confirm permission does not exist
+
+Replace <USER_ADMIN_ROLE> with the role name from the token.
+
+SQL:
+
+SELECT COUNT(*) AS edit_permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = <request_facility_id>
+  AND keycloak_role_id IN ('<USER_ADMIN_ROLE>')
+  AND deleted_at IS NULL;
+
+Expected before error test:
+edit_permission_count = 0
+
+
+Step 2: Send Postman request
+
+Exact endpoint to write in Postman:
+http://localhost:8081/facilities/<request_facility_id>/copy
+
+Method:
+POST
+
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "parent_id": <valid_parent_id>,
+  "target_facility_id": null
+}
+
+
+Step 3: Expected response by Excel
+
+Expected:
+Error response.
+
+Expected response idea:
+{
+  "success": false,
+  "error_code": "permission_denied",
+  "message": "施設を登録する権限がありません",
+  "errors": null,
+  "data": null
+}
+
+Note:
+The exact Japanese message depends on backend implementation.
+The important checks are:
+1. success = false
+2. error_code = permission_denied
+3. data = null
+
+
+Step 4: Current code result check
+
+With the current code after the USER_ADMIN permission fix, this request should return permission_denied.
+
+If it returns success, recheck these items:
+1. The backend was restarted after the latest code change.
+2. The bearer token is really USER_ADMIN, not SYS_ADMIN.
+3. The SQL permission count is really 0.
+4. facility_role_permission.keycloak_role_id matches the role value extracted by the backend.
+
+
+Step 5: Add permission and confirm success
+
+After confirming the error case, add permission data directly in DB.
+
+Example SQL:
+
+INSERT INTO facility_role_permission (
+    permission_id,
+    facility_id,
+    keycloak_role_id,
+    keycloak_role_name,
+    created_at,
+    updated_at
+)
+VALUES (
+    10,
+    <request_facility_id>,
+    '<USER_ADMIN_ROLE>',
+    '<USER_ADMIN_ROLE>',
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
+);
+
+Then rerun the same Postman request:
+
+POST http://localhost:8081/facilities/<request_facility_id>/copy
+
+Body:
+{
+  "parent_id": <valid_parent_id>,
+  "target_facility_id": null
+}
+
+Expected after adding permission:
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "errors": null,
+  "data": {
+    "facility_id": <new_copied_facility_id>
+  }
+}
+
+
+Shared SYS_ADMIN Steps
+
+For all other copy checks, use the same steps from:
+
+docs/facilitiesコピー(SYS_ADMIN）.txt
+
+Shared cases include:
+1. invalid token / invalid request tests
+2. copy to first position
+3. copy between facilities
+4. copy to last position
+5. DB checks for parent_id, sort_order, timestamps
+6. vr_image checks
+7. map checks
+8. map_point checks
+9. roles checks
+10. equipments checks
+11. annotations not copied
+12. children and descendants copy checks
+
+Only difference:
+Use USER_ADMIN bearer token, and confirm permission_id = 10 behavior first.
+
+
+Quick Checklist
+
+1. Use USER_ADMIN bearer token.
+2. Use endpoint:
+   http://localhost:8081/facilities/<facilityId>/copy
+3. First test the no-permission case.
+4. Confirm SQL count for permission_id = 10 is 0.
+5. Send copy request.
+6. Expected by Excel: permission error.
+7. If current backend returns success, restart the backend and recheck the token role and permission SQL.
+8. Add permission_id = 10 for the USER_ADMIN role.
+9. Send copy request again.
+10. Expected after adding permission: success.

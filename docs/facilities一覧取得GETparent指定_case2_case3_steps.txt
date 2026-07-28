@@ -1,0 +1,249 @@
+facilities一覧取得GETparent指定 - Case 2 and Case 3 Test Steps
+
+Purpose
+This file explains how to test these Excel cases:
+
+2. GET /facilities?parentId=<child facility ID>
+   SYS_ADMIN user
+
+3. GET /facilities?parentId=<facility ID directly above the lowest layer>
+   SYS_ADMIN user
+
+Current Code Check
+The same API endpoint handles both cases:
+
+GET /facilities?parentId=<facility_id>
+
+The API should return only the direct child facilities where:
+
+facilities_tree.parent_id = <facility_id>
+facilities_tree.deleted_at IS NULL
+
+For SYS_ADMIN, the API does not need to filter by facility_role_permission.
+If the SQL result and Postman response data match, the implementation is correct.
+
+Postman Header
+Use a SYS_ADMIN access token.
+
+Authorization: Bearer <SYS_ADMIN access_token>
+
+
+Step 1: Find the Top / Root Facility
+The top root facility has parent_id = NULL.
+
+SQL:
+
+SELECT facility_id, parent_id, facility_name, tree_level, sort_order
+FROM facilities_tree
+WHERE parent_id IS NULL
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+
+Use one returned facility_id as:
+
+<top_facility_id>
+
+
+Step 2: Find Child Facilities Under the Top Facility
+These are direct children of the root facility.
+Use the facility_id from step 1 as <top_facility_id>:
+
+SQL:
+
+SELECT facility_id, parent_id, facility_name, tree_level, sort_order
+FROM facilities_tree
+WHERE parent_id = <top_facility_id>
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+
+
+Case 2: parentId = Child Facility ID
+Excel meaning:
+Use one child facility ID that was returned from the top/root list.
+Then call GET /facilities?parentId=<that child facility ID>.
+
+Find a child facility that itself has child facilities:
+
+SELECT
+  p.facility_id AS case2_parent_id,
+  p.facility_name,
+  p.tree_level,
+  COUNT(c.facility_id) AS child_count
+FROM facilities_tree p
+JOIN facilities_tree c
+  ON c.parent_id = p.facility_id
+ AND c.deleted_at IS NULL
+WHERE p.parent_id = <top_facility_id>
+  AND p.deleted_at IS NULL
+GROUP BY p.facility_id, p.facility_name, p.tree_level, p.sort_order
+ORDER BY p.sort_order, p.facility_id;
+
+Use a case2_parent_id whose child_count is 1 or more.
+
+Expected DB result:
+
+SELECT facility_id, parent_id, facility_name, public_flag, outer_flag,
+       created_at, updated_at, deleted_at
+FROM facilities_tree
+WHERE parent_id = <case2_parent_id>
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=<case2_parent_id>
+
+Check:
+1. success is true.
+2. error_code is null.
+3. message is ok.
+4. data count equals the SQL row count.
+5. Each data row matches the SQL result.
+
+
+How to Check Your Current parentId = 1111
+Run this SQL:
+
+SELECT facility_id, parent_id, facility_name, tree_level, sort_order
+FROM facilities_tree
+WHERE parent_id = 1111
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+
+Then call:
+
+GET http://localhost:8081/facilities?parentId=1111
+
+If the SQL returns rows, Postman data should contain the same rows.
+If the SQL returns 0 rows, Postman should return a normal success response with an empty data list.
+
+
+Case 3: parentId = Facility Directly Above the Lowest Layer
+Excel meaning:
+Choose a facility that has children, but those children do not have their own children.
+
+In the image example:
+NULL is the root parent.
+1001 is a child of the root.
+203 is directly above the lowest layer.
+303 is a child under 203 and has no children.
+
+Find a facility directly above the lowest layer:
+
+SELECT
+  p.facility_id AS case3_parent_id,
+  p.facility_name,
+  p.tree_level,
+  COUNT(c.facility_id) AS direct_child_count
+FROM facilities_tree p
+JOIN facilities_tree c
+  ON c.parent_id = p.facility_id
+ AND c.deleted_at IS NULL
+WHERE p.deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM facilities_tree gc
+    WHERE gc.parent_id = c.facility_id
+      AND gc.deleted_at IS NULL
+  )
+GROUP BY p.facility_id, p.facility_name, p.tree_level, p.sort_order
+HAVING COUNT(c.facility_id) > 0
+ORDER BY p.tree_level DESC, p.sort_order, p.facility_id;
+
+Use one case3_parent_id.
+
+Expected DB result:
+
+SELECT
+  c.facility_id,
+  c.parent_id,
+  c.facility_name,
+  c.public_flag,
+  c.outer_flag,
+  c.created_at,
+  c.updated_at,
+  c.deleted_at,
+  COUNT(gc.facility_id) AS child_count
+FROM facilities_tree c
+LEFT JOIN facilities_tree gc
+  ON gc.parent_id = c.facility_id
+ AND gc.deleted_at IS NULL
+WHERE c.parent_id = <case3_parent_id>
+  AND c.deleted_at IS NULL
+GROUP BY c.facility_id, c.parent_id, c.facility_name, c.public_flag,
+         c.outer_flag, c.created_at, c.updated_at, c.deleted_at, c.sort_order
+ORDER BY c.sort_order, c.facility_id;
+
+For Case 3, each returned child should have:
+
+child_count = 0
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=<case3_parent_id>
+
+Check:
+1. success is true.
+2. error_code is null.
+3. message is ok.
+4. data count equals the SQL row count.
+5. Each child returned by Postman has no further children in DB.
+
+
+Response Field Mapping
+Compare Postman response with DB columns:
+
+facility_id  -> facilities_tree.facility_id
+parent_id    -> facilities_tree.parent_id
+facility_name -> facilities_tree.facility_name
+publish_mode -> facilities_tree.public_flag
+is_outdoor   -> facilities_tree.outer_flag
+created_at   -> facilities_tree.created_at
+updated_at   -> facilities_tree.updated_at
+deleted_at   -> facilities_tree.deleted_at
+
+
+Boolean Field Checks
+For every facility returned in Postman, check these SQL counts.
+If count is 1 or more, the response value should be true.
+If count is 0, the response value should be false.
+
+has_vr_image:
+
+SELECT COUNT(*) AS vr_image_count
+FROM facility_images
+WHERE facility_id = <returned_facility_id>
+  AND deleted_at IS NULL;
+
+has_emergency_annotation:
+
+SELECT COUNT(*) AS emergency_annotation_count
+FROM annotations
+WHERE facility_id = <returned_facility_id>
+  AND annotation_type = '10'
+  AND deleted_at IS NULL;
+
+has_normal_annotation:
+
+SELECT COUNT(*) AS normal_annotation_count
+FROM annotations
+WHERE facility_id = <returned_facility_id>
+  AND annotation_type <> '10'
+  AND deleted_at IS NULL;
+
+has_equipment:
+
+SELECT COUNT(*) AS equipment_count
+FROM equipments
+WHERE facility_id = <returned_facility_id>
+  AND deleted_at IS NULL;
+
+
+Conclusion
+Case 2 and Case 3 do not require different API URLs.
+Both use:
+
+GET /facilities?parentId=<facility_id>
+
+Only the selected parentId changes.
+If the API returns direct children sorted by sort_order and the response fields match the SQL result, these cases are implemented correctly.

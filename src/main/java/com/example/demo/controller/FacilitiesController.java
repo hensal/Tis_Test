@@ -119,20 +119,30 @@ public class FacilitiesController {
     @PostMapping("/{facilityId}/move")
     public ResponseEntity<ApiResponse<Map<String, Object>>> moveFacility(
             @PathVariable String facilityId,
-            @RequestBody Map<String, Object> request
+            @RequestBody Map<String, Object> request,
+            Authentication authentication
     ) {
         return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.moveFacility(parseFacilityId(facilityId), request))
+                ApiResponse.ok(facilitiesService.moveFacility(
+                        parseFacilityId(facilityId),
+                        request,
+                        extractRoleNames(authentication)
+                ))
         );
     }
 
     @PostMapping("/{facilityId}/copy")
     public ResponseEntity<ApiResponse<Map<String, Object>>> copyFacility(
             @PathVariable String facilityId,
-            @RequestBody Map<String, Object> request
+            @RequestBody Map<String, Object> request,
+            Authentication authentication
     ) {
         return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.copyFacility(parseFacilityId(facilityId), request))
+                ApiResponse.ok(facilitiesService.copyFacility(
+                        parseFacilityId(facilityId),
+                        request,
+                        extractRoleNames(authentication)
+                ))
         );
     }
 

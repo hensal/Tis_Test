@@ -287,10 +287,12 @@ public class FacilitiesService {
     @Transactional
     public Map<String, Object> moveFacility(
             Long facilityId,
-            Map<String, Object> request
+            Map<String, Object> request,
+            Set<String> userRoles
     ) {
         FacilityRecord facility = getActiveFacility(facilityId);
         ensureNotConflicted(facility, request);
+        ensureEditPermission(facilityId, userRoles);
         Long parentId = optionalLong(request.get("parent_id"));
         FacilityRecord parent = parentId == null ? null : getActiveFacility(parentId);
         Long targetFacilityId = optionalLong(request.get("target_facility_id"));
@@ -318,16 +320,20 @@ public class FacilitiesService {
         updateParentLeafState(facility.parentId);
         updateParentLeafState(parentId);
 
-        return toDetailResponse(getActiveFacility(facilityId));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("facility_id", facilityId);
+        return data;
     }
 
     @Transactional
     public Map<String, Object> copyFacility(
             Long facilityId,
-            Map<String, Object> request
+            Map<String, Object> request,
+            Set<String> userRoles
     ) {
         FacilityRecord source = getActiveFacility(facilityId);
         ensureNotConflicted(source, request);
+        ensureEditPermission(facilityId, userRoles);
         Long parentId = optionalLong(request.get("parent_id"));
         FacilityRecord parent = parentId == null ? null : getActiveFacility(parentId);
         Long targetFacilityId = optionalLong(request.get("target_facility_id"));
@@ -371,7 +377,9 @@ public class FacilitiesService {
         copyRelatedRows(facilityId, copiedFacilityId);
         updateParentLeafState(parentId);
 
-        return toDetailResponse(getActiveFacility(copiedFacilityId));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("facility_id", copiedFacilityId);
+        return data;
     }
 
     public Map<String, Object> getVrView(Long facilityId) {
@@ -855,6 +863,15 @@ public class FacilitiesService {
         }
     }
 
+    private void ensureEditPermission(
+            Long facilityId,
+            Set<String> userRoles
+    ) {
+        if (!hasFacilityPermission(facilityId, userRoles, FACILITY_EDIT_PERMISSION_ID)) {
+            throw permissionDenied();
+        }
+    }
+
     private void ensureViewPermission(
             Long facilityId,
             Set<String> userRoles
@@ -904,25 +921,29 @@ public class FacilitiesService {
 
     private int createSortOrder(Long parentId, Long targetFacilityId) {
         if (targetFacilityId == null) {
-            Integer maxSortOrder;
+            Integer minSortOrder;
 
             if (parentId == null) {
-                maxSortOrder = jdbcTemplate.queryForObject("""
-                        SELECT COALESCE(MAX(sort_order), 0)
+                minSortOrder = jdbcTemplate.queryForObject("""
+                        SELECT MIN(sort_order)
                           FROM facilities_tree
                          WHERE parent_id IS NULL
                            AND deleted_at IS NULL
                         """, Integer.class);
             } else {
-                maxSortOrder = jdbcTemplate.queryForObject("""
-                        SELECT COALESCE(MAX(sort_order), 0)
+                minSortOrder = jdbcTemplate.queryForObject("""
+                        SELECT MIN(sort_order)
                           FROM facilities_tree
                          WHERE parent_id = ?
                            AND deleted_at IS NULL
                         """, Integer.class, parentId);
             }
 
-            return (maxSortOrder == null ? 0 : maxSortOrder) + 10_000_000;
+            if (minSortOrder == null) {
+                return 10_000_000;
+            }
+
+            return Math.max(1, minSortOrder / 2);
         }
 
         List<Integer> targetSortOrders = jdbcTemplate.query("""
@@ -939,18 +960,21 @@ public class FacilitiesService {
 
         Integer targetSortOrder = targetSortOrders.getFirst();
 
-        Integer nextSortOrder = jdbcTemplate.queryForObject("""
-                SELECT MIN(sort_order)
+        List<Integer> nextSortOrders = jdbcTemplate.query("""
+                SELECT sort_order
                   FROM facilities_tree
                  WHERE ((? IS NULL AND parent_id IS NULL) OR parent_id = ?)
-                   AND sort_order > ?
+                   AND facility_id > ?
                    AND deleted_at IS NULL
-                """, Integer.class, parentId, parentId, targetSortOrder);
+                 ORDER BY facility_id ASC
+                 LIMIT 1
+                """, (rs, rowNum) -> rs.getInt("sort_order"), parentId, parentId, targetFacilityId);
 
-        if (nextSortOrder == null) {
+        if (nextSortOrders.isEmpty()) {
             return targetSortOrder + 10_000_000;
         }
 
+        Integer nextSortOrder = nextSortOrders.getFirst();
         return targetSortOrder + Math.max(1, (nextSortOrder - targetSortOrder) / 2);
     }
 

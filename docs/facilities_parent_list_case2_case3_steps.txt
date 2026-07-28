@@ -1,0 +1,267 @@
+facilities一覧取得GETparent指定 - Case 2 and Case 3 Test Steps
+
+Purpose
+This document explains how to test:
+
+2. GET /facilities?parentId=<child facility id>
+   SYS_ADMIN user
+
+3. GET /facilities?parentId=<facility id directly above lowest layer>
+   SYS_ADMIN user
+
+Main Meaning
+- Top/root facility means parent_id IS NULL.
+- The parentId request parameter is the facility_id of the parent node.
+- The API response data must be only the direct children of that parent.
+- Case 2 uses one child facility_id returned from the first parent list.
+- Case 3 uses a facility_id directly above the lowest layer. Its returned children should not have more children.
+
+Current Code Check
+If GET /facilities?parentId=... queries facilities_tree where parent_id = request parentId and deleted_at IS NULL, ordered by sort_order, then the current code supports both Case 2 and Case 3.
+No separate endpoint is needed.
+
+Common Postman Setup
+Method:
+GET
+
+URL:
+http://localhost:8081/facilities?parentId=<parent_facility_id>
+
+Headers:
+Authorization: Bearer <SYS_ADMIN access token>
+
+Body:
+None
+
+Step 0: Check All Facility Tree Data
+Use this SQL to see the whole tree:
+
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  tree_level,
+  sort_order,
+  deleted_at
+FROM facilities_tree
+WHERE deleted_at IS NULL
+ORDER BY COALESCE(parent_id, 0), sort_order, facility_id;
+
+Step 1: Find Top/Root Facility
+Top/root facility has parent_id IS NULL.
+
+SELECT
+  facility_id AS top_facility_id,
+  facility_name,
+  tree_level,
+  sort_order
+FROM facilities_tree
+WHERE parent_id IS NULL
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+
+Step 2: Get Children Of Top/Root Facility
+Use the top_facility_id from Step 1.
+
+Postman:
+GET http://localhost:8081/facilities?parentId=<top_facility_id>
+
+DB check:
+
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  public_flag,
+  outer_flag,
+  created_at,
+  updated_at,
+  deleted_at
+FROM facilities_tree
+WHERE parent_id = <top_facility_id>
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+
+Expected:
+- success is true
+- error_code is null
+- message is ok
+- data length equals SQL row count
+- every response data.parent_id equals <top_facility_id>
+
+Case 2: GET /facilities?parentId=Child Facility ID
+Find a child facility id from the top/root response.
+
+SQL:
+
+SELECT
+  facility_id AS child_facility_id_as_parent,
+  parent_id,
+  facility_name,
+  tree_level,
+  sort_order
+FROM facilities_tree
+WHERE parent_id = <top_facility_id>
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+
+Use one returned facility_id as parentId.
+Example:
+
+GET http://localhost:8081/facilities?parentId=1111
+
+DB check for parentId=1111:
+
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  public_flag,
+  outer_flag,
+  created_at,
+  updated_at,
+  deleted_at
+FROM facilities_tree
+WHERE parent_id = 1111
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+
+Expected:
+- success is true
+- data length equals SQL row count
+- every response data.parent_id is 1111
+- response fields match DB:
+  facility_id -> facility_id
+  parent_id -> parent_id
+  facility_name -> facility_name
+  publish_mode -> public_flag
+  is_outdoor -> outer_flag
+  created_at -> created_at
+  updated_at -> updated_at
+  deleted_at -> deleted_at
+
+Case 3: GET /facilities?parentId=Facility Directly Above Lowest Layer
+Find a facility that has children, but those children do not have children.
+
+SQL:
+
+SELECT
+  p.facility_id AS parent_id_for_case_3,
+  p.facility_name,
+  p.tree_level,
+  COUNT(c.facility_id) AS direct_child_count
+FROM facilities_tree p
+JOIN facilities_tree c
+  ON c.parent_id = p.facility_id
+ AND c.deleted_at IS NULL
+WHERE p.deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM facilities_tree gc
+    WHERE gc.parent_id = c.facility_id
+      AND gc.deleted_at IS NULL
+  )
+GROUP BY p.facility_id, p.facility_name, p.tree_level, p.sort_order
+HAVING COUNT(c.facility_id) > 0
+ORDER BY p.tree_level DESC, p.sort_order, p.facility_id;
+
+Use parent_id_for_case_3 in Postman:
+
+GET http://localhost:8081/facilities?parentId=<parent_id_for_case_3>
+
+DB check:
+
+SELECT
+  c.facility_id,
+  c.parent_id,
+  c.facility_name,
+  c.public_flag,
+  c.outer_flag,
+  c.created_at,
+  c.updated_at,
+  c.deleted_at,
+  COUNT(gc.facility_id) AS child_count
+FROM facilities_tree c
+LEFT JOIN facilities_tree gc
+  ON gc.parent_id = c.facility_id
+ AND gc.deleted_at IS NULL
+WHERE c.parent_id = <parent_id_for_case_3>
+  AND c.deleted_at IS NULL
+GROUP BY
+  c.facility_id,
+  c.parent_id,
+  c.facility_name,
+  c.public_flag,
+  c.outer_flag,
+  c.created_at,
+  c.updated_at,
+  c.deleted_at,
+  c.sort_order
+ORDER BY c.sort_order, c.facility_id;
+
+Expected:
+- success is true
+- data length equals SQL row count
+- every response data.parent_id equals <parent_id_for_case_3>
+- every SQL child_count is 0
+- response fields match DB
+
+Boolean Field Checks For Each Returned Facility
+Use these SQL checks for each returned facility_id.
+
+has_vr_image:
+
+SELECT COUNT(*) AS vr_image_count
+FROM facility_images
+WHERE facility_id = <returned_facility_id>
+  AND deleted_at IS NULL;
+
+If count >= 1, has_vr_image must be true.
+If count = 0, has_vr_image must be false.
+
+has_emergency_annotation:
+
+SELECT COUNT(*) AS emergency_annotation_count
+FROM annotations
+WHERE facility_id = <returned_facility_id>
+  AND annotation_type = '10'
+  AND deleted_at IS NULL;
+
+If count >= 1, has_emergency_annotation must be true.
+If count = 0, has_emergency_annotation must be false.
+
+has_normal_annotation:
+
+SELECT COUNT(*) AS normal_annotation_count
+FROM annotations
+WHERE facility_id = <returned_facility_id>
+  AND annotation_type <> '10'
+  AND deleted_at IS NULL;
+
+If count >= 1, has_normal_annotation must be true.
+If count = 0, has_normal_annotation must be false.
+
+has_equipment:
+
+SELECT COUNT(*) AS equipment_count
+FROM equipments
+WHERE facility_id = <returned_facility_id>
+  AND deleted_at IS NULL;
+
+If count >= 1, has_equipment must be true.
+If count = 0, has_equipment must be false.
+
+Important Notes
+- SYS_ADMIN does not need facility_role_permission rows for this list test.
+- If the SQL returns 0 rows, the API should still return success true with data [].
+- If you use parentId=1111, first confirm that facility_id 1111 exists:
+
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  tree_level
+FROM facilities_tree
+WHERE facility_id = 1111
+  AND deleted_at IS NULL;
+

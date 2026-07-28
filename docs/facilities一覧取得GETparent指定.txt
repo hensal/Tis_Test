@@ -1670,3 +1670,212 @@ FROM facilities_tree
 WHERE parent_id = <top_facility_id>
   AND deleted_at IS NULL
 ORDER BY sort_order ASC, facility_id ASC;
+## 2. List Direct Child Facilities By Child Facility ID
+
+Japanese test title:
+一覧取得（直下施設一覧）
+GET /facilities?parentId=上記で取得した子ファシリティのID
+（SYS_ADMINロールを持つユーザ）
+
+### 2-0. Find The Required parentId
+
+First find a top-level facility that has child facilities.
+Use one `child_facility_id` from this SQL result as `<parentId_for_case_2>`.
+
+```sql
+SELECT
+  p.facility_id AS top_parent_id,
+  p.facility_name AS top_parent_name,
+  c.facility_id AS child_facility_id,
+  c.facility_name AS child_facility_name,
+  c.sort_order
+FROM facilities_tree p
+JOIN facilities_tree c
+  ON c.parent_id = p.facility_id
+WHERE p.deleted_at IS NULL
+  AND c.deleted_at IS NULL
+ORDER BY p.facility_id, c.sort_order, c.facility_id;
+```
+
+Then confirm which records the API should return:
+
+```sql
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  public_flag,
+  outer_flag,
+  created_at,
+  updated_at,
+  deleted_at
+FROM facilities_tree
+WHERE parent_id = <parentId_for_case_2>
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+```
+
+### 2-1. Response Parameters
+
+Postman request:
+
+```text
+GET http://localhost:8081/facilities?parentId=<parentId_for_case_2>
+Authorization: Bearer <SYS_ADMIN access_token>
+```
+
+Expected basic response:
+
+```json
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": []
+}
+```
+
+`data` should contain the same records as the SQL above.
+
+Check each returned row:
+
+- 2-1-1 `data` count: matches the SQL result count.
+- 2-1-2 `facility_id`: matches `facilities_tree.facility_id`.
+- 2-1-3 `parent_id`: matches `facilities_tree.parent_id` and equals `<parentId_for_case_2>`.
+- 2-1-4 `facility_name`: matches `facilities_tree.facility_name`.
+- 2-1-5 `publish_mode`: matches the API mapping from `facilities_tree.public_flag`.
+- 2-1-6 `is_outdoor`: matches `facilities_tree.outer_flag`.
+- 2-1-7 `has_vr_image`: true if the SQL count below is 1 or more, otherwise false.
+- 2-1-8 `has_emergency_annotation`: true if the SQL count below is 1 or more, otherwise false.
+- 2-1-9 `has_normal_annotation`: true if the SQL count below is 1 or more, otherwise false.
+- 2-1-10 `has_equipment`: true if the SQL count below is 1 or more, otherwise false.
+- 2-1-11 `created_at`: matches `facilities_tree.created_at`.
+- 2-1-12 `updated_at`: matches `facilities_tree.updated_at`.
+- 2-1-13 `deleted_at`: matches `facilities_tree.deleted_at`.
+
+Flag check SQL for each returned `facility_id`:
+
+```sql
+-- has_vr_image
+SELECT COUNT(*) AS has_vr_image_count
+FROM facility_images
+WHERE facility_id = <returned_facility_id>
+  AND deleted_at IS NULL;
+
+-- has_emergency_annotation
+SELECT COUNT(*) AS emergency_annotation_count
+FROM annotations
+WHERE facility_id = <returned_facility_id>
+  AND annotation_type = '10'
+  AND deleted_at IS NULL;
+
+-- has_normal_annotation
+SELECT COUNT(*) AS normal_annotation_count
+FROM annotations
+WHERE facility_id = <returned_facility_id>
+  AND annotation_type <> '10'
+  AND deleted_at IS NULL;
+
+-- has_equipment
+SELECT COUNT(*) AS equipment_count
+FROM equipments
+WHERE facility_id = <returned_facility_id>
+  AND deleted_at IS NULL;
+```
+
+## 2. GET /facilities?parentId=<child facility id> (SYS_ADMIN) - added 2026-07-24
+
+Purpose:
+Use one child facility returned from section 1 as the next `parentId`. The API response must match the direct children of that child facility.
+
+Find the required child facility id:
+
+```sql
+SELECT
+  p.facility_id AS top_parent_id,
+  p.facility_name AS top_parent_name,
+  c.facility_id AS parent_id_for_case_2,
+  c.facility_name AS child_facility_name,
+  c.sort_order
+FROM facilities_tree p
+JOIN facilities_tree c ON c.parent_id = p.facility_id
+WHERE p.deleted_at IS NULL
+  AND c.deleted_at IS NULL
+ORDER BY p.facility_id, c.sort_order, c.facility_id;
+```
+
+Use `parent_id_for_case_2` in Postman.
+
+Postman request:
+
+```http
+GET http://localhost:8081/facilities?parentId=<parent_id_for_case_2>
+Authorization: Bearer <SYS_ADMIN access_token>
+```
+
+Expected DB rows:
+
+```sql
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  public_flag,
+  outer_flag,
+  created_at,
+  updated_at,
+  deleted_at
+FROM facilities_tree
+WHERE parent_id = <parent_id_for_case_2>
+  AND deleted_at IS NULL
+ORDER BY sort_order, facility_id;
+```
+
+2-1 response checks:
+
+- 2-1-1 `data` count equals the SQL row count.
+- 2-1-2 `facility_id` equals `facilities_tree.facility_id`.
+- 2-1-3 `parent_id` equals `<parent_id_for_case_2>`.
+- 2-1-4 `facility_name` equals `facilities_tree.facility_name`.
+- 2-1-5 `publish_mode` matches `facilities_tree.public_flag` after API conversion.
+- 2-1-6 `is_outdoor` equals `facilities_tree.outer_flag`.
+- 2-1-11 `created_at` equals `facilities_tree.created_at`.
+- 2-1-12 `updated_at` equals `facilities_tree.updated_at`.
+- 2-1-13 `deleted_at` equals `facilities_tree.deleted_at`.
+
+Boolean checks for each returned facility:
+
+```sql
+SELECT COUNT(*) AS has_vr_image_count
+FROM facility_images
+WHERE facility_id = <returned_facility_id>
+  AND deleted_at IS NULL;
+
+SELECT COUNT(*) AS emergency_annotation_count
+FROM annotations
+WHERE facility_id = <returned_facility_id>
+  AND annotation_type = '10'
+  AND deleted_at IS NULL;
+
+SELECT COUNT(*) AS normal_annotation_count
+FROM annotations
+WHERE facility_id = <returned_facility_id>
+  AND annotation_type <> '10'
+  AND deleted_at IS NULL;
+
+SELECT COUNT(*) AS equipment_count
+FROM equipments
+WHERE facility_id = <returned_facility_id>
+  AND deleted_at IS NULL;
+```
+
+- 2-1-7 `has_vr_image` is true when `has_vr_image_count >= 1`, otherwise false.
+- 2-1-8 `has_emergency_annotation` is true when `emergency_annotation_count >= 1`, otherwise false.
+- 2-1-9 `has_normal_annotation` is true when `normal_annotation_count >= 1`, otherwise false.
+- 2-1-10 `has_equipment` is true when `equipment_count >= 1`, otherwise false.
+
+Column note:
+
+- Excel `PARENT_FACILITY_ID` means DB `parent_id`.
+- Excel `NODE_NAME` means DB `facility_name`.
+
