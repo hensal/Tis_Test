@@ -5,29 +5,28 @@ Purpose:
 Postman steps for Excel cases 1 through 8:
 GET /facilities?parentId=<facility_id>
 
-Portable rule:
-Run the DB setup SQL first on any computer, then use the fixed IDs below.
-
-Fixed test IDs:
-<top_facility_id> = 300000
-<child_facility_id> = 300100
-<second_child_facility_id> = 300200
-<middle_facility_id> = 300110
-<above_lowest_facility_id> = 300111
-<lowest_facility_id> = 300112
+This document uses separate DB data for each role:
+- SYS_ADMIN test data starts with 3000000
+- USER01 test data starts with 400000
 
 USER01 role used by SQL:
 R_USER01
 
-If your USER01 token has a different role ID, replace R_USER01 in the SQL with that role ID.
+If your USER01 token has a different role ID, replace R_USER01 in the SQL.
 
 
-Before Testing: Create Required DB Data
---------------------------------------
+Before Testing: Create SYS_ADMIN DB Data
+---------------------------------------
 
-Run this SQL in pgAdmin before Postman.
+Fixed SYS_ADMIN IDs:
+<sys_top_facility_id> = 3000000
+<sys_child_facility_id> = 3000100
+<sys_second_child_facility_id> = 3000200
+<sys_middle_facility_id> = 3000110
+<sys_above_lowest_facility_id> = 3000111
+<sys_lowest_facility_id> = 3000112
 
-SQL:
+Run this SQL in pgAdmin:
 
 BEGIN;
 
@@ -45,7 +44,7 @@ SET deleted_at = NULL,
 INSERT INTO equipment_types (
   equipment_type_id, equipment_type_name, created_at, updated_at, deleted_at
 ) VALUES (
-  300001, 'parent list equipment type', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+  3000001, 'sys parent list equipment type', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
 )
 ON CONFLICT (equipment_type_id) DO UPDATE
 SET deleted_at = NULL,
@@ -56,8 +55,8 @@ INSERT INTO equipment_masters (
   equipment_info_json, equipment_info_html,
   created_at, updated_at, deleted_at
 ) VALUES (
-  300001, 300001, 'parent list equipment',
-  '{"type":"parent-list"}', '<p>parent list</p>',
+  3000001, 3000001, 'sys parent list equipment',
+  '{"type":"sys-parent-list"}', '<p>sys parent list</p>',
   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
 )
 ON CONFLICT (equipment_master_id) DO UPDATE
@@ -78,12 +77,12 @@ INSERT INTO facilities_tree (
   public_flag, outer_flag, facility_description, authority_setting_flg,
   created_at, updated_at, deleted_at
 ) VALUES
-  (300000, NULL, 'parent_list_top_300000', 300000, 1, FALSE, '01', FALSE, 'Top test facility', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300100, 300000, 'parent_list_child_300100', 10000000, 2, FALSE, '01', FALSE, 'Child test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300200, 300000, 'parent_list_second_child_300200', 20000000, 2, TRUE, '02', TRUE, 'Second child test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300110, 300100, 'parent_list_middle_300110', 10000000, 3, FALSE, '01', FALSE, 'Middle test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300111, 300110, 'parent_list_above_lowest_300111', 10000000, 4, FALSE, '01', FALSE, 'Above lowest test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300112, 300111, 'parent_list_lowest_300112', 10000000, 5, TRUE, '01', FALSE, 'Lowest test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+  (3000000, NULL, 'sys_parent_list_top_3000000', 3000000, 1, FALSE, '01', FALSE, 'SYS top test facility', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000100, 3000000, 'sys_parent_list_child_3000100', 10000000, 2, FALSE, '01', FALSE, 'SYS child test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000200, 3000000, 'sys_parent_list_second_child_3000200', 20000000, 2, TRUE, '02', TRUE, 'SYS second child test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000110, 3000100, 'sys_parent_list_middle_3000110', 10000000, 3, FALSE, '01', FALSE, 'SYS middle test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000111, 3000110, 'sys_parent_list_above_lowest_3000111', 10000000, 4, FALSE, '01', FALSE, 'SYS above lowest test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000112, 3000111, 'sys_parent_list_lowest_3000112', 10000000, 5, TRUE, '01', FALSE, 'SYS lowest test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
 ON CONFLICT (facility_id) DO UPDATE
 SET parent_id = EXCLUDED.parent_id,
     facility_name = EXCLUDED.facility_name,
@@ -100,10 +99,10 @@ SET parent_id = EXCLUDED.parent_id,
 INSERT INTO files (
   file_id, file_name, file_path, file_type, file_size, s3_bucket, created_at, deleted_at
 ) VALUES
-  (300501, 'parent-list-300100.jpg', '/300501', 'vr_image', 1000, 'parent-list-test', CURRENT_TIMESTAMP, NULL),
-  (300502, 'parent-list-300110.jpg', '/300502', 'vr_image', 1000, 'parent-list-test', CURRENT_TIMESTAMP, NULL),
-  (300503, 'parent-list-300111.jpg', '/300503', 'vr_image', 1000, 'parent-list-test', CURRENT_TIMESTAMP, NULL),
-  (300504, 'parent-list-300112.jpg', '/300504', 'vr_image', 1000, 'parent-list-test', CURRENT_TIMESTAMP, NULL)
+  (3000501, 'sys-parent-list-3000100.jpg', '/3000501', 'vr_image', 1000, 'sys-parent-list-test', CURRENT_TIMESTAMP, NULL),
+  (3000502, 'sys-parent-list-3000110.jpg', '/3000502', 'vr_image', 1000, 'sys-parent-list-test', CURRENT_TIMESTAMP, NULL),
+  (3000503, 'sys-parent-list-3000111.jpg', '/3000503', 'vr_image', 1000, 'sys-parent-list-test', CURRENT_TIMESTAMP, NULL),
+  (3000504, 'sys-parent-list-3000112.jpg', '/3000504', 'vr_image', 1000, 'sys-parent-list-test', CURRENT_TIMESTAMP, NULL)
 ON CONFLICT (file_id) DO UPDATE
 SET deleted_at = NULL;
 
@@ -111,10 +110,10 @@ INSERT INTO facility_images (
   image_id, facility_id, file_id, image_name, shooting_height, ceiling_height,
   created_at, updated_at, deleted_at
 ) VALUES
-  (300601, 300100, 300501, 'parent-list-300100.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300602, 300110, 300502, 'parent-list-300110.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300603, 300111, 300503, 'parent-list-300111.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300604, 300112, 300504, 'parent-list-300112.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+  (3000601, 3000100, 3000501, 'sys-parent-list-3000100.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000602, 3000110, 3000502, 'sys-parent-list-3000110.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000603, 3000111, 3000503, 'sys-parent-list-3000111.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000604, 3000112, 3000504, 'sys-parent-list-3000112.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
 ON CONFLICT (image_id) DO UPDATE
 SET deleted_at = NULL,
     updated_at = CURRENT_TIMESTAMP;
@@ -124,11 +123,11 @@ INSERT INTO annotations (
   created_by, display_expire_type, display_expire_at, yaw, pitch,
   created_at, updated_at, deleted_at
 ) VALUES
-  (300701, 300100, '10', 'emergency 300100', 'emergency annotation', 'parent-list-test', FALSE, NULL, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300702, 300100, '20', 'normal 300100', 'normal annotation', 'parent-list-test', FALSE, NULL, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300703, 300110, '20', 'normal 300110', 'normal annotation', 'parent-list-test', FALSE, NULL, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300704, 300111, '10', 'emergency 300111', 'emergency annotation', 'parent-list-test', FALSE, NULL, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300705, 300112, '20', 'normal 300112', 'normal annotation', 'parent-list-test', FALSE, NULL, 5, 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+  (3000701, 3000100, '10', 'sys emergency 3000100', 'emergency annotation', 'parent-list-test', FALSE, NULL, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000702, 3000100, '20', 'sys normal 3000100', 'normal annotation', 'parent-list-test', FALSE, NULL, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000703, 3000110, '20', 'sys normal 3000110', 'normal annotation', 'parent-list-test', FALSE, NULL, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000704, 3000111, '10', 'sys emergency 3000111', 'emergency annotation', 'parent-list-test', FALSE, NULL, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000705, 3000112, '20', 'sys normal 3000112', 'normal annotation', 'parent-list-test', FALSE, NULL, 5, 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
 ON CONFLICT (annotation_id) DO UPDATE
 SET deleted_at = NULL,
     updated_at = CURRENT_TIMESTAMP;
@@ -137,10 +136,142 @@ INSERT INTO equipments (
   equipment_id, facility_id, equipment_master_id, yaw, pitch,
   created_at, updated_at, deleted_at
 ) VALUES
-  (300801, 300100, 300001, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300802, 300110, 300001, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300803, 300111, 300001, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300804, 300112, 300001, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+  (3000801, 3000100, 3000001, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000802, 3000110, 3000001, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000803, 3000111, 3000001, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (3000804, 3000112, 3000001, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (equipment_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+COMMIT;
+
+
+Before Testing: Create USER01 DB Data
+------------------------------------
+
+Fixed USER01 IDs:
+<user_top_facility_id> = 400000
+<user_child_facility_id> = 400100
+<user_second_child_facility_id> = 400200
+<user_middle_facility_id> = 400110
+<user_above_lowest_facility_id> = 400111
+<user_lowest_facility_id> = 400112
+
+Run this SQL in pgAdmin:
+
+BEGIN;
+
+INSERT INTO permission_master (
+  permission_id, permission_name, created_at, updated_at, deleted_at
+) VALUES
+  (20, 'VR画像参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (30, '付箋参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (40, '付箋追加・変更・削除', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (50, '設備参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (permission_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipment_types (
+  equipment_type_id, equipment_type_name, created_at, updated_at, deleted_at
+) VALUES (
+  400001, 'user parent list equipment type', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+)
+ON CONFLICT (equipment_type_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipment_masters (
+  equipment_master_id, equipment_type_id, equipment_name,
+  equipment_info_json, equipment_info_html,
+  created_at, updated_at, deleted_at
+) VALUES (
+  400001, 400001, 'user parent list equipment',
+  '{"type":"user-parent-list"}', '<p>user parent list</p>',
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+)
+ON CONFLICT (equipment_master_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO annotation_type_master (
+  annotation_type, annotation_type_name, created_at, updated_at, deleted_at
+) VALUES
+  ('10', '緊急', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  ('20', '通常', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (annotation_type) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO facilities_tree (
+  facility_id, parent_id, facility_name, sort_order, tree_level, is_leaf,
+  public_flag, outer_flag, facility_description, authority_setting_flg,
+  created_at, updated_at, deleted_at
+) VALUES
+  (400000, NULL, 'user_parent_list_top_400000', 400000, 1, FALSE, '01', FALSE, 'USER top test facility', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400100, 400000, 'user_parent_list_child_400100', 10000000, 2, FALSE, '01', FALSE, 'USER child test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400200, 400000, 'user_parent_list_second_child_400200', 20000000, 2, TRUE, '02', TRUE, 'USER second child test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400110, 400100, 'user_parent_list_middle_400110', 10000000, 3, FALSE, '01', FALSE, 'USER middle test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400111, 400110, 'user_parent_list_above_lowest_400111', 10000000, 4, FALSE, '01', FALSE, 'USER above lowest test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400112, 400111, 'user_parent_list_lowest_400112', 10000000, 5, TRUE, '01', FALSE, 'USER lowest test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (facility_id) DO UPDATE
+SET parent_id = EXCLUDED.parent_id,
+    facility_name = EXCLUDED.facility_name,
+    sort_order = EXCLUDED.sort_order,
+    tree_level = EXCLUDED.tree_level,
+    is_leaf = EXCLUDED.is_leaf,
+    public_flag = EXCLUDED.public_flag,
+    outer_flag = EXCLUDED.outer_flag,
+    facility_description = EXCLUDED.facility_description,
+    authority_setting_flg = EXCLUDED.authority_setting_flg,
+    updated_at = CURRENT_TIMESTAMP,
+    deleted_at = NULL;
+
+INSERT INTO files (
+  file_id, file_name, file_path, file_type, file_size, s3_bucket, created_at, deleted_at
+) VALUES
+  (400501, 'user-parent-list-400100.jpg', '/400501', 'vr_image', 1000, 'user-parent-list-test', CURRENT_TIMESTAMP, NULL),
+  (400502, 'user-parent-list-400110.jpg', '/400502', 'vr_image', 1000, 'user-parent-list-test', CURRENT_TIMESTAMP, NULL),
+  (400503, 'user-parent-list-400111.jpg', '/400503', 'vr_image', 1000, 'user-parent-list-test', CURRENT_TIMESTAMP, NULL),
+  (400504, 'user-parent-list-400112.jpg', '/400504', 'vr_image', 1000, 'user-parent-list-test', CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (file_id) DO UPDATE
+SET deleted_at = NULL;
+
+INSERT INTO facility_images (
+  image_id, facility_id, file_id, image_name, shooting_height, ceiling_height,
+  created_at, updated_at, deleted_at
+) VALUES
+  (400601, 400100, 400501, 'user-parent-list-400100.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400602, 400110, 400502, 'user-parent-list-400110.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400603, 400111, 400503, 'user-parent-list-400111.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400604, 400112, 400504, 'user-parent-list-400112.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (image_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO annotations (
+  annotation_id, facility_id, annotation_type, annotation_title, annotation_content,
+  created_by, display_expire_type, display_expire_at, yaw, pitch,
+  created_at, updated_at, deleted_at
+) VALUES
+  (400701, 400100, '10', 'user emergency 400100', 'emergency annotation', 'parent-list-test', FALSE, NULL, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400702, 400100, '20', 'user normal 400100', 'normal annotation', 'parent-list-test', FALSE, NULL, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400703, 400110, '20', 'user normal 400110', 'normal annotation', 'parent-list-test', FALSE, NULL, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400704, 400111, '10', 'user emergency 400111', 'emergency annotation', 'parent-list-test', FALSE, NULL, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400705, 400112, '20', 'user normal 400112', 'normal annotation', 'parent-list-test', FALSE, NULL, 5, 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (annotation_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipments (
+  equipment_id, facility_id, equipment_master_id, yaw, pitch,
+  created_at, updated_at, deleted_at
+) VALUES
+  (400801, 400100, 400001, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400802, 400110, 400001, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400803, 400111, 400001, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400804, 400112, 400001, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
 ON CONFLICT (equipment_id) DO UPDATE
 SET deleted_at = NULL,
     updated_at = CURRENT_TIMESTAMP;
@@ -149,35 +280,28 @@ INSERT INTO facility_role_permission (
   facility_role_permission_id, permission_id, facility_id, keycloak_role_id, keycloak_role_name,
   created_at, updated_at, deleted_at
 ) VALUES
-  (300901, 20, 300100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300902, 30, 300100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300903, 50, 300100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300904, 20, 300200, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300905, 20, 300110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300906, 30, 300110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300907, 50, 300110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300908, 20, 300111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300909, 30, 300111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300910, 50, 300111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300911, 20, 300112, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300912, 30, 300112, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-  (300913, 50, 300112, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+  (400901, 20, 400100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400902, 30, 400100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400903, 50, 400100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400904, 20, 400200, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400905, 20, 400110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400906, 30, 400110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400907, 50, 400110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400908, 20, 400111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400909, 30, 400111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400910, 50, 400111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400911, 20, 400112, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400912, 30, 400112, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (400913, 50, 400112, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
 ON CONFLICT (facility_role_permission_id) DO UPDATE
 SET deleted_at = NULL,
     updated_at = CURRENT_TIMESTAMP;
 
-SELECT setval(pg_get_serial_sequence('facilities_tree', 'facility_id'), COALESCE((SELECT MAX(facility_id) FROM facilities_tree), 1), true);
-SELECT setval(pg_get_serial_sequence('files', 'file_id'), COALESCE((SELECT MAX(file_id) FROM files), 1), true);
-SELECT setval(pg_get_serial_sequence('facility_images', 'image_id'), COALESCE((SELECT MAX(image_id) FROM facility_images), 1), true);
-SELECT setval(pg_get_serial_sequence('annotations', 'annotation_id'), COALESCE((SELECT MAX(annotation_id) FROM annotations), 1), true);
-SELECT setval(pg_get_serial_sequence('equipments', 'equipment_id'), COALESCE((SELECT MAX(equipment_id) FROM equipments), 1), true);
-SELECT setval(pg_get_serial_sequence('facility_role_permission', 'facility_role_permission_id'), COALESCE((SELECT MAX(facility_role_permission_id) FROM facility_role_permission), 1), true);
-
 COMMIT;
 
 
-Before Testing: Confirm Prepared DB Tree
----------------------------------------
+Before Testing: Confirm Both DB Trees
+------------------------------------
 
 SQL:
 
@@ -190,12 +314,14 @@ SELECT
   sort_order,
   deleted_at
 FROM facilities_tree
-WHERE facility_id BETWEEN 300000 AND 300999
-ORDER BY tree_level ASC, sort_order ASC, facility_id ASC;
+WHERE facility_id IN (
+  3000000, 3000100, 3000200, 3000110, 3000111, 3000112,
+  400000, 400100, 400200, 400110, 400111, 400112
+)
+ORDER BY facility_id;
 
 Expected:
-300000 root, 300100 and 300200 direct children, 300110 child, 300111 above lowest, 300112 lowest.
-All deleted_at values are NULL.
+All rows exist and deleted_at is NULL.
 
 
 Before Testing: Confirm USER01 Permission Data
@@ -209,20 +335,19 @@ SELECT
   keycloak_role_id,
   deleted_at
 FROM facility_role_permission
-WHERE facility_id BETWEEN 300000 AND 300999
+WHERE facility_id IN (400100, 400200, 400110, 400111, 400112)
   AND keycloak_role_id = 'R_USER01'
 ORDER BY facility_id, permission_id;
 
 Expected:
-Rows exist for facilities 300100, 300200, 300110, 300111, 300112.
+Rows exist for USER01 facilities 400100, 400200, 400110, 400111, 400112.
 All deleted_at values are NULL.
 
 
-Common Response Check SQL
--------------------------
+SYS_ADMIN Response Check SQL
+----------------------------
 
-Use this SQL to calculate expected response rows for SYS_ADMIN.
-Replace <parent_id>.
+Replace <parent_id> with the SYS parent ID for each case.
 
 SELECT
   ft.facility_id,
@@ -260,15 +385,11 @@ WHERE ft.parent_id = <parent_id>
   AND ft.deleted_at IS NULL
 ORDER BY ft.sort_order ASC, ft.facility_id ASC;
 
-Expected:
-Postman data count and row values match this SQL.
 
+USER01 Response Check SQL
+-------------------------
 
-Common USER01 Response Check SQL
---------------------------------
-
-Use this SQL to calculate expected response rows for USER01.
-Replace <parent_id>.
+Replace <parent_id> with the USER parent ID for each case.
 
 SELECT DISTINCT
   ft.facility_id,
@@ -346,149 +467,97 @@ WHERE ft.parent_id = <parent_id>
   AND ft.deleted_at IS NULL
 ORDER BY ft.sort_order ASC, ft.facility_id ASC;
 
-Expected:
-Postman data count and row values match this SQL.
-
 
 Case 1: SYS_ADMIN, Top Level Parent
 ----------------------------------
 
-Excel:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=TopレベルファシリティのID
-SYS_ADMIN role user
-
 Postman:
 
-GET http://localhost:8081/facilities?parentId=300000
+GET http://localhost:8081/facilities?parentId=3000000
 
 Headers:
 Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
 
-Expected response:
-success = true
-data contains direct children 300100 and 300200 ordered by sort_order.
-
 Check SQL:
 
-SELECT
-  facility_id,
-  parent_id,
-  facility_name,
-  public_flag AS publish_mode,
-  outer_flag AS is_outdoor,
-  sort_order,
-  deleted_at
+SELECT facility_id, parent_id, facility_name, sort_order, deleted_at
 FROM facilities_tree
-WHERE parent_id = 300000
+WHERE parent_id = 3000000
   AND deleted_at IS NULL
 ORDER BY sort_order ASC, facility_id ASC;
 
 Expected:
-Rows 300100, 300200.
+Rows 3000100, 3000200.
 
 
 Case 2: SYS_ADMIN, Child Facility Parent
 ---------------------------------------
 
-Excel:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=上記で取得した子ファシリティのID
-SYS_ADMIN role user
-
 Use child from Case 1:
-<child_facility_id> = 300100
+<sys_child_facility_id> = 3000100
 
 Postman:
 
-GET http://localhost:8081/facilities?parentId=300100
+GET http://localhost:8081/facilities?parentId=3000100
 
 Headers:
 Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
 
 Check SQL:
 
-SELECT
-  facility_id,
-  parent_id,
-  facility_name,
-  public_flag AS publish_mode,
-  outer_flag AS is_outdoor,
-  sort_order,
-  deleted_at
+SELECT facility_id, parent_id, facility_name, sort_order, deleted_at
 FROM facilities_tree
-WHERE parent_id = 300100
+WHERE parent_id = 3000100
   AND deleted_at IS NULL
 ORDER BY sort_order ASC, facility_id ASC;
 
 Expected:
-Row 300110.
+Row 3000110.
 
 
 Case 3: SYS_ADMIN, Facility Just Above Lowest Level
 --------------------------------------------------
 
-Excel:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=最下層直上のファシリティのID
-SYS_ADMIN role user
-
 Use:
-<above_lowest_facility_id> = 300111
+<sys_above_lowest_facility_id> = 3000111
 
 Postman:
 
-GET http://localhost:8081/facilities?parentId=300111
+GET http://localhost:8081/facilities?parentId=3000111
 
 Headers:
 Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
 
 Check SQL:
 
-SELECT
-  facility_id,
-  parent_id,
-  facility_name,
-  public_flag AS publish_mode,
-  outer_flag AS is_outdoor,
-  sort_order,
-  deleted_at
+SELECT facility_id, parent_id, facility_name, sort_order, deleted_at
 FROM facilities_tree
-WHERE parent_id = 300111
+WHERE parent_id = 3000111
   AND deleted_at IS NULL
 ORDER BY sort_order ASC, facility_id ASC;
 
 Expected:
-Row 300112.
+Row 3000112.
 
 
 Case 4: SYS_ADMIN, Lowest Level Parent
 -------------------------------------
 
-Excel:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=最下層のファシリティのID
-SYS_ADMIN role user
-
 Use:
-<lowest_facility_id> = 300112
+<sys_lowest_facility_id> = 3000112
 
 Postman:
 
-GET http://localhost:8081/facilities?parentId=300112
+GET http://localhost:8081/facilities?parentId=3000112
 
 Headers:
 Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
 
 Check SQL:
 
-SELECT
-  facility_id,
-  parent_id,
-  facility_name,
-  deleted_at
+SELECT facility_id, parent_id, facility_name, deleted_at
 FROM facilities_tree
-WHERE parent_id = 300112
+WHERE parent_id = 3000112
   AND deleted_at IS NULL
 ORDER BY sort_order ASC, facility_id ASC;
 
@@ -500,154 +569,109 @@ Postman data = [].
 Case 5: USER01, Top Level Parent
 -------------------------------
 
-Excel:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=TopレベルファシリティのID
-USER01
-
 Postman:
 
-GET http://localhost:8081/facilities?parentId=300000
+GET http://localhost:8081/facilities?parentId=400000
 
 Headers:
 Authorization: Bearer <USER01_ACCESS_TOKEN>
 
 Check SQL:
 
-SELECT DISTINCT
-  ft.facility_id,
-  ft.parent_id,
-  ft.facility_name,
-  ft.public_flag AS publish_mode,
-  ft.outer_flag AS is_outdoor,
-  ft.sort_order,
-  ft.deleted_at
+SELECT DISTINCT ft.facility_id, ft.parent_id, ft.facility_name, ft.sort_order, ft.deleted_at
 FROM facilities_tree ft
 JOIN facility_role_permission frp
   ON frp.facility_id = ft.facility_id
  AND frp.keycloak_role_id IN ('R_USER01')
  AND frp.deleted_at IS NULL
-WHERE ft.parent_id = 300000
+WHERE ft.parent_id = 400000
   AND ft.deleted_at IS NULL
 ORDER BY ft.sort_order ASC, ft.facility_id ASC;
 
 Expected:
-Rows 300100, 300200.
+Rows 400100, 400200.
 
 
 Case 6: USER01, Child Facility Parent
 ------------------------------------
 
-Excel:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=上記で取得した子ファシリティのID
-USER01
-
 Use child from Case 5:
-<child_facility_id> = 300100
+<user_child_facility_id> = 400100
 
 Postman:
 
-GET http://localhost:8081/facilities?parentId=300100
+GET http://localhost:8081/facilities?parentId=400100
 
 Headers:
 Authorization: Bearer <USER01_ACCESS_TOKEN>
 
 Check SQL:
 
-SELECT DISTINCT
-  ft.facility_id,
-  ft.parent_id,
-  ft.facility_name,
-  ft.public_flag AS publish_mode,
-  ft.outer_flag AS is_outdoor,
-  ft.sort_order,
-  ft.deleted_at
+SELECT DISTINCT ft.facility_id, ft.parent_id, ft.facility_name, ft.sort_order, ft.deleted_at
 FROM facilities_tree ft
 JOIN facility_role_permission frp
   ON frp.facility_id = ft.facility_id
  AND frp.keycloak_role_id IN ('R_USER01')
  AND frp.deleted_at IS NULL
-WHERE ft.parent_id = 300100
+WHERE ft.parent_id = 400100
   AND ft.deleted_at IS NULL
 ORDER BY ft.sort_order ASC, ft.facility_id ASC;
 
 Expected:
-Row 300110.
+Row 400110.
 
 
 Case 7: USER01, Facility Just Above Lowest Level
 -----------------------------------------------
 
-Excel:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=最下層直上のファシリティのID
-USER01
-
 Use:
-<above_lowest_facility_id> = 300111
+<user_above_lowest_facility_id> = 400111
 
 Postman:
 
-GET http://localhost:8081/facilities?parentId=300111
+GET http://localhost:8081/facilities?parentId=400111
 
 Headers:
 Authorization: Bearer <USER01_ACCESS_TOKEN>
 
 Check SQL:
 
-SELECT DISTINCT
-  ft.facility_id,
-  ft.parent_id,
-  ft.facility_name,
-  ft.public_flag AS publish_mode,
-  ft.outer_flag AS is_outdoor,
-  ft.sort_order,
-  ft.deleted_at
+SELECT DISTINCT ft.facility_id, ft.parent_id, ft.facility_name, ft.sort_order, ft.deleted_at
 FROM facilities_tree ft
 JOIN facility_role_permission frp
   ON frp.facility_id = ft.facility_id
  AND frp.keycloak_role_id IN ('R_USER01')
  AND frp.deleted_at IS NULL
-WHERE ft.parent_id = 300111
+WHERE ft.parent_id = 400111
   AND ft.deleted_at IS NULL
 ORDER BY ft.sort_order ASC, ft.facility_id ASC;
 
 Expected:
-Row 300112.
+Row 400112.
 
 
 Case 8: USER01, Lowest Level Parent
 ----------------------------------
 
-Excel:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=最下層のファシリティのID
-USER01
-
 Use:
-<lowest_facility_id> = 300112
+<user_lowest_facility_id> = 400112
 
 Postman:
 
-GET http://localhost:8081/facilities?parentId=300112
+GET http://localhost:8081/facilities?parentId=400112
 
 Headers:
 Authorization: Bearer <USER01_ACCESS_TOKEN>
 
 Check SQL:
 
-SELECT DISTINCT
-  ft.facility_id,
-  ft.parent_id,
-  ft.facility_name,
-  ft.deleted_at
+SELECT DISTINCT ft.facility_id, ft.parent_id, ft.facility_name, ft.deleted_at
 FROM facilities_tree ft
 JOIN facility_role_permission frp
   ON frp.facility_id = ft.facility_id
  AND frp.keycloak_role_id IN ('R_USER01')
  AND frp.deleted_at IS NULL
-WHERE ft.parent_id = 300112
+WHERE ft.parent_id = 400112
   AND ft.deleted_at IS NULL
 ORDER BY ft.sort_order ASC, ft.facility_id ASC;
 
@@ -659,8 +683,8 @@ Postman data = [].
 Response Fields To Compare For Every Non-Empty Case
 ---------------------------------------------------
 
-For SYS_ADMIN cases, use "Common Response Check SQL" with the case parent_id.
-For USER01 cases, use "Common USER01 Response Check SQL" with the case parent_id.
+For SYS_ADMIN cases, use "SYS_ADMIN Response Check SQL" with the case parent_id.
+For USER01 cases, use "USER01 Response Check SQL" with the case parent_id.
 
 Compare these fields:
 - data[].facility_id = facilities_tree.facility_id
