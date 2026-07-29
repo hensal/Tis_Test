@@ -1,1881 +1,687 @@
 facilities一覧取得GETparent指定
 ================================
 
-1 List GET direct child facilities, SYS_ADMIN
-=============================================
-
-Excel section:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=TopレベルファシリティのID
-（SYS_ADMINロールを持つユーザ）
-
-Endpoint:
-GET /facilities?parentId=<top_facility_id>
-
-User:
-SYS_ADMIN access token
-
-Note:
-The Excel uses these names:
-- PARENT_FACILITY_ID = parent_id
-- NODE_NAME = facility_name
-- PUBLIC_FLAG = public_flag / response publish_mode
-- OUTER_FLAG = outer_flag / response is_outdoor
-
-Find a Top facility ID first
-----------------------------
-
-Use a facility that has child facilities.
-
-SQL:
-
-SELECT
-  p.facility_id AS top_facility_id,
-  p.facility_name AS top_facility_name,
-  COUNT(c.facility_id) AS child_count
-FROM facilities_tree p
-JOIN facilities_tree c
-  ON c.parent_id = p.facility_id
-WHERE p.deleted_at IS NULL
-  AND c.deleted_at IS NULL
-GROUP BY p.facility_id, p.facility_name
-ORDER BY p.facility_id;
-
-Pick one `top_facility_id` where `child_count >= 1`.
-
-Postman request
----------------
-
-Method:
-GET
-
-URL:
-http://localhost:8081/facilities?parentId=<top_facility_id>
-
-Headers:
-Authorization: Bearer <SYS_ADMIN access_token>
-
-Expected base response:
-
-{
-  "success": true,
-  "error_code": null,
-  "message": "ok",
-  "data": [
-    {
-      "facility_id": 1001,
-      "parent_id": 1,
-      "facility_name": "example child",
-      "publish_mode": "02",
-      "is_outdoor": false,
-      "has_vr_image": false,
-      "has_emergency_annotation": false,
-      "has_normal_annotation": false,
-      "has_equipment": false,
-      "created_at": "2026/07/23 10:00:00",
-      "updated_at": "2026/07/23 10:00:00",
-      "deleted_at": null
-    }
-  ]
-}
-
-1-2 Response Parameters
------------------------
-
-1-2-1 Data count
-----------------
-Meaning:
-All active direct child facilities of the specified Top facility ID must be listed.
-
-SQL:
-
-SELECT *
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-- `data` is an array.
-- `data.length` equals the SQL result count.
-- Order matches `sort_order ASC, facility_id ASC`.
-
-1-2-2 facility_id
------------------
-Meaning:
-The child facility ID.
-
-SQL:
-
-SELECT facility_id
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-`data[].facility_id` matches `facilities_tree.facility_id`.
-
-1-2-3 parent_id
----------------
-Meaning:
-The parent ID of each returned child facility.
-
-SQL:
-
-SELECT facility_id, parent_id
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-Every `data[].parent_id` equals the requested `<top_facility_id>`.
-
-1-2-4 facility_name
--------------------
-Meaning:
-Child facility name.
-
-SQL:
-
-SELECT facility_id, facility_name
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-`data[].facility_name` matches `facilities_tree.facility_name`.
-
-1-2-5 publish_mode
-------------------
-Meaning:
-Child facility public flag.
-
-SQL:
-
-SELECT facility_id, public_flag
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-`data[].publish_mode` matches `facilities_tree.public_flag`.
-
-1-2-6 is_outdoor
-----------------
-Meaning:
-Child facility outdoor flag.
-
-SQL:
-
-SELECT facility_id, outer_flag
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-`data[].is_outdoor` matches `facilities_tree.outer_flag`.
-
-1-2-7 has_vr_image
-------------------
-Meaning:
-For each child facility, true when at least one active facility_images row exists.
-
-SQL for one child facility:
-
-SELECT COUNT(*) AS vr_image_count
-FROM facilities_tree ft
-JOIN facility_images fi
-  ON fi.facility_id = ft.facility_id
-WHERE ft.facility_id = <child_facility_id>
-  AND ft.deleted_at IS NULL
-  AND fi.deleted_at IS NULL;
-
-Expected:
-- count >= 1: `has_vr_image = true`
-- count = 0: `has_vr_image = false`
-
-1-2-8 has_emergency_annotation
-------------------------------
-Meaning:
-For each child facility, true when at least one active emergency annotation exists.
-Current code treats emergency annotation_type as `10`.
-
-SQL for one child facility:
-
-SELECT COUNT(*) AS emergency_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-WHERE ft.facility_id = <child_facility_id>
-  AND a.annotation_type = '10'
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL;
-
-Expected:
-- count >= 1: `has_emergency_annotation = true`
-- count = 0: `has_emergency_annotation = false`
-
-1-2-9 has_normal_annotation
----------------------------
-Meaning:
-For each child facility, true when at least one active non-emergency annotation exists.
-
-SQL for one child facility:
-
-SELECT COUNT(*) AS normal_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-WHERE ft.facility_id = <child_facility_id>
-  AND a.annotation_type <> '10'
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL;
-
-Expected:
-- count >= 1: `has_normal_annotation = true`
-- count = 0: `has_normal_annotation = false`
-
-1-2-10 has_equipment
---------------------
-Meaning:
-For each child facility, true when at least one active equipments row exists.
-
-SQL for one child facility:
-
-SELECT COUNT(*) AS equipment_count
-FROM facilities_tree ft
-JOIN equipments e
-  ON e.facility_id = ft.facility_id
-WHERE ft.facility_id = <child_facility_id>
-  AND ft.deleted_at IS NULL
-  AND e.deleted_at IS NULL;
-
-Expected:
-- count >= 1: `has_equipment = true`
-- count = 0: `has_equipment = false`
-
-1-2-11 created_at
------------------
-Meaning:
-Child facility created date/time.
-
-SQL:
-
-SELECT facility_id, created_at
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-`data[].created_at` matches `facilities_tree.created_at`.
-
-1-2-12 updated_at
------------------
-Meaning:
-Child facility updated date/time.
-
-SQL:
-
-SELECT facility_id, updated_at
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-`data[].updated_at` matches `facilities_tree.updated_at`.
-
-1-2-13 deleted_at
------------------
-Meaning:
-Child facility deleted date/time.
-
-SQL:
-
-SELECT facility_id, deleted_at
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-6 List GET direct child facilities of the child facility found above, USER01
-===========================================================================
-
-Excel section:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=上記で取得した子ファシリティのID
-（USER01）
-
-Endpoint:
-GET /facilities?parentId=<child_facility_id_from_section_5>
-
-User:
-USER01 access token
-
-Meaning:
-Use one child facility returned in section 5 as the next parentId. The API result must match the same USER01 permission-filtered logic from section 5.
-
-Find a child facility from section 5 that can be used as parentId
------------------------------------------------------------------
-
-SQL:
-
-SELECT DISTINCT
-  ft.facility_id AS child_facility_id,
-  ft.parent_id,
-  ft.facility_name,
-  ft.sort_order
-FROM facilities_tree ft
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.parent_id = <top_facility_id>
-  AND ft.deleted_at IS NULL
-  AND frp.deleted_at IS NULL
-  AND frp.keycloak_role_id IN ('R_USER01')
-ORDER BY ft.sort_order ASC, ft.facility_id ASC;
-
-Use one returned child_facility_id in Postman.
-
-Expected child facilities from DB
----------------------------------
-
-SQL:
-
-SELECT DISTINCT
-  ft.facility_id,
-  ft.parent_id,
-  ft.facility_name,
-  ft.public_flag,
-  ft.outer_flag,
-  ft.created_at,
-  ft.updated_at,
-  ft.deleted_at
-FROM facilities_tree ft
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.parent_id = <child_facility_id_from_section_5>
-  AND ft.deleted_at IS NULL
-  AND frp.deleted_at IS NULL
-  AND frp.keycloak_role_id IN ('R_USER01')
-ORDER BY ft.sort_order ASC, ft.facility_id ASC;
-
-Postman request
----------------
-
-Method:
-GET
-
-URL:
-http://localhost:8081/facilities?parentId=<child_facility_id_from_section_5>
-
-Headers:
-Authorization: Bearer <USER01 access_token>
-
-6-1 Response Parameters
------------------------
-
-6-1-1 Data count
-----------------
-Check:
-Same as 5-2-1. data count must match the expected child facilities SQL above.
-
-6-1-2 facility_id
------------------
-Check:
-Same as 1-2-2. data[].facility_id must match facilities_tree.facility_id.
-
-6-1-3 parent_id
----------------
-Check:
-Same as 1-2-3. data[].parent_id must match the requested child_facility_id_from_section_5.
-
-6-1-4 facility_name
--------------------
-Check:
-Same as 1-2-4. data[].facility_name must match facilities_tree.facility_name.
-
-6-1-5 publish_mode
-------------------
-Check:
-Same as 1-2-5. data[].publish_mode must match facilities_tree.public_flag.
-
-6-1-6 is_outdoor
-----------------
-Check:
-Same as 1-2-6. data[].is_outdoor must match facilities_tree.outer_flag.
-
-6-1-7 has_vr_image
-------------------
-Check:
-Same as 5-2-7. Run this for each returned facility_id.
-
-SQL:
-
-SELECT COUNT(*) AS visible_vr_image_count
-FROM facilities_tree ft
-JOIN facility_images fi
-  ON fi.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND frp.permission_id = 20
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND fi.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-6-1-8 has_emergency_annotation
-------------------------------
-Check:
-Same as 5-2-8. Run this for each returned facility_id.
-
-SQL:
-
-SELECT COUNT(*) AS visible_emergency_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND a.annotation_type = '10'
-  AND frp.permission_id IN (30, 40)
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-6-1-9 has_normal_annotation
----------------------------
-Check:
-Same as 5-2-9. Run this for each returned facility_id.
-
-SQL:
-
-SELECT COUNT(*) AS visible_normal_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND a.annotation_type <> '10'
-  AND frp.permission_id IN (30, 40)
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-6-1-10 has_equipment
---------------------
-Check:
-Same as 5-2-10. Run this for each returned facility_id.
-
-SQL:
-
-SELECT COUNT(*) AS visible_equipment_count
-FROM facilities_tree ft
-JOIN equipments e
-  ON e.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND frp.permission_id = 50
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND e.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-6-1-11 created_at
------------------
-Check:
-Same as 1-2-11. data[].created_at must match facilities_tree.created_at.
-
-6-1-12 updated_at
------------------
-Check:
-Same as 1-2-12. data[].updated_at must match facilities_tree.updated_at.
-
-6-1-13 deleted_at
------------------
-Check:
-Same as 1-2-13. Because this API only returns active rows, data[].deleted_at should normally be null.
-
-7 List GET direct child facilities of the facility just above lowest level, USER01
-================================================================================
-
-Excel section:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=最下層直上のファシリティのID
-（USER01）
-
-Endpoint:
-GET /facilities?parentId=<facility_id_above_lowest_level>
-
-User:
-USER01 access token
-
-Meaning:
-Use a facility that has only lowest-level children. The returned children must match USER01 permission-filtered DB results.
-
-Find a facility just above the lowest level and visible to USER01
-----------------------------------------------------------------
-
-SQL:
-
-SELECT DISTINCT
-  p.facility_id AS facility_id_above_lowest_level,
-  p.parent_id,
-  p.facility_name,
-  p.tree_level
-FROM facilities_tree p
-JOIN facilities_tree c
-  ON c.parent_id = p.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = c.facility_id
-WHERE p.deleted_at IS NULL
-  AND c.deleted_at IS NULL
-  AND c.is_leaf = TRUE
-  AND frp.deleted_at IS NULL
-  AND frp.keycloak_role_id IN ('R_USER01')
-ORDER BY p.tree_level DESC, p.facility_id ASC;
-
-Use one returned facility_id_above_lowest_level in Postman.
-
-Expected child facilities from DB
----------------------------------
-
-SQL:
-
-SELECT DISTINCT
-  ft.facility_id,
-  ft.parent_id,
-  ft.facility_name,
-  ft.public_flag,
-  ft.outer_flag,
-  ft.created_at,
-  ft.updated_at,
-  ft.deleted_at
-FROM facilities_tree ft
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.parent_id = <facility_id_above_lowest_level>
-  AND ft.deleted_at IS NULL
-  AND frp.deleted_at IS NULL
-  AND frp.keycloak_role_id IN ('R_USER01')
-ORDER BY ft.sort_order ASC, ft.facility_id ASC;
-
-Postman request
----------------
-
-Method:
-GET
-
-URL:
-http://localhost:8081/facilities?parentId=<facility_id_above_lowest_level>
-
-Headers:
-Authorization: Bearer <USER01 access_token>
-
-7-1 Response Parameters
------------------------
-
-7-1-1 Data count
-----------------
-Check:
-Same as 5-2-1. data count must match the expected child facilities SQL above.
-
-7-1-2 facility_id
------------------
-Check:
-Same as 1-2-2. data[].facility_id must match facilities_tree.facility_id.
-
-7-1-3 parent_id
----------------
-Check:
-Same as 1-2-3. data[].parent_id must match the requested facility_id_above_lowest_level.
-
-7-1-4 facility_name
--------------------
-Check:
-Same as 1-2-4. data[].facility_name must match facilities_tree.facility_name.
-
-7-1-5 publish_mode
-------------------
-Check:
-Same as 1-2-5. data[].publish_mode must match facilities_tree.public_flag.
-
-7-1-6 is_outdoor
-----------------
-Check:
-Same as 1-2-6. data[].is_outdoor must match facilities_tree.outer_flag.
-
-7-1-7 has_vr_image
-------------------
-Check:
-Same as 5-2-7. Run this for each returned facility_id.
-
-SQL:
-
-SELECT COUNT(*) AS visible_vr_image_count
-FROM facilities_tree ft
-JOIN facility_images fi
-  ON fi.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND frp.permission_id = 20
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND fi.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-7-1-8 has_emergency_annotation
-------------------------------
-Check:
-Same as 5-2-8. Run this for each returned facility_id.
-
-SQL:
-
-SELECT COUNT(*) AS visible_emergency_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND a.annotation_type = '10'
-  AND frp.permission_id IN (30, 40)
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-7-1-9 has_normal_annotation
----------------------------
-Check:
-Same as 5-2-9. Run this for each returned facility_id.
-
-SQL:
-
-SELECT COUNT(*) AS visible_normal_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND a.annotation_type <> '10'
-  AND frp.permission_id IN (30, 40)
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-7-1-10 has_equipment
---------------------
-Check:
-Same as 5-2-10. Run this for each returned facility_id.
-
-SQL:
-
-SELECT COUNT(*) AS visible_equipment_count
-FROM facilities_tree ft
-JOIN equipments e
-  ON e.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND frp.permission_id = 50
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND e.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-7-1-11 created_at
------------------
-Check:
-Same as 1-2-11. data[].created_at must match facilities_tree.created_at.
-
-7-1-12 updated_at
------------------
-Check:
-Same as 1-2-12. data[].updated_at must match facilities_tree.updated_at.
-
-7-1-13 deleted_at
------------------
-Check:
-Same as 1-2-13. Because this API only returns active rows, data[].deleted_at should normally be null.
-
-Expected:
-Because this API only returns active rows, `data[].deleted_at` should normally be null.
-
-8 List GET direct child facilities of lowest-level facility, USER01
-==================================================================
-
-Japanese test item:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=最下層のファシリティのID
-（USER01）
-
-Goal:
-Use a USER01 token and request the direct children of a lowest-level facility.
-Because the selected facility is already the lowest level, it has no child facilities.
-The API should return a normal success response with zero data rows.
-
-Important:
-For USER01 tests, first confirm which Keycloak roles the login user has.
-
-Postman:
-GET http://localhost:8081/api/keycloak/me
-Authorization: Bearer <USER01 access_token>
-
-Example expected role:
+Purpose:
+Postman steps for Excel cases 1 through 8:
+GET /facilities?parentId=<facility_id>
+
+Portable rule:
+Run the DB setup SQL first on any computer, then use the fixed IDs below.
+
+Fixed test IDs:
+<top_facility_id> = 300000
+<child_facility_id> = 300100
+<second_child_facility_id> = 300200
+<middle_facility_id> = 300110
+<above_lowest_facility_id> = 300111
+<lowest_facility_id> = 300112
+
+USER01 role used by SQL:
 R_USER01
 
-Step 1: find a lowest-level facility visible to USER01
-------------------------------------------------------
-Run this SQL first.
+If your USER01 token has a different role ID, replace R_USER01 in the SQL with that role ID.
+
+
+Before Testing: Create Required DB Data
+--------------------------------------
+
+Run this SQL in pgAdmin before Postman.
 
 SQL:
 
-SELECT DISTINCT
-  ft.facility_id AS lowest_level_facility_id,
-  ft.parent_id,
-  ft.facility_name,
-  ft.tree_level
-FROM facilities_tree ft
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.deleted_at IS NULL
-  AND ft.is_leaf = TRUE
-  AND frp.deleted_at IS NULL
-  AND frp.keycloak_role_id IN ('R_USER01')
-ORDER BY ft.tree_level DESC, ft.facility_id ASC;
+BEGIN;
 
-Use one returned lowest_level_facility_id as <lowest_level_facility_id>.
+INSERT INTO permission_master (
+  permission_id, permission_name, created_at, updated_at, deleted_at
+) VALUES
+  (20, 'VR画像参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (30, '付箋参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (40, '付箋追加・変更・削除', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (50, '設備参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (permission_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-Step 2: confirm this facility has no child facilities
-----------------------------------------------------
-SQL:
+INSERT INTO equipment_types (
+  equipment_type_id, equipment_type_name, created_at, updated_at, deleted_at
+) VALUES (
+  300001, 'parent list equipment type', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+)
+ON CONFLICT (equipment_type_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-SELECT COUNT(*) AS child_count
-FROM facilities_tree
-WHERE parent_id = <lowest_level_facility_id>
-  AND deleted_at IS NULL;
+INSERT INTO equipment_masters (
+  equipment_master_id, equipment_type_id, equipment_name,
+  equipment_info_json, equipment_info_html,
+  created_at, updated_at, deleted_at
+) VALUES (
+  300001, 300001, 'parent list equipment',
+  '{"type":"parent-list"}', '<p>parent list</p>',
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+)
+ON CONFLICT (equipment_master_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-Expected:
-child_count = 0
+INSERT INTO annotation_type_master (
+  annotation_type, annotation_type_name, created_at, updated_at, deleted_at
+) VALUES
+  ('10', '緊急', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  ('20', '通常', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (annotation_type) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-If child_count is not 0, choose another lowest_level_facility_id from Step 1.
+INSERT INTO facilities_tree (
+  facility_id, parent_id, facility_name, sort_order, tree_level, is_leaf,
+  public_flag, outer_flag, facility_description, authority_setting_flg,
+  created_at, updated_at, deleted_at
+) VALUES
+  (300000, NULL, 'parent_list_top_300000', 300000, 1, FALSE, '01', FALSE, 'Top test facility', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300100, 300000, 'parent_list_child_300100', 10000000, 2, FALSE, '01', FALSE, 'Child test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300200, 300000, 'parent_list_second_child_300200', 20000000, 2, TRUE, '02', TRUE, 'Second child test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300110, 300100, 'parent_list_middle_300110', 10000000, 3, FALSE, '01', FALSE, 'Middle test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300111, 300110, 'parent_list_above_lowest_300111', 10000000, 4, FALSE, '01', FALSE, 'Above lowest test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300112, 300111, 'parent_list_lowest_300112', 10000000, 5, TRUE, '01', FALSE, 'Lowest test facility', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (facility_id) DO UPDATE
+SET parent_id = EXCLUDED.parent_id,
+    facility_name = EXCLUDED.facility_name,
+    sort_order = EXCLUDED.sort_order,
+    tree_level = EXCLUDED.tree_level,
+    is_leaf = EXCLUDED.is_leaf,
+    public_flag = EXCLUDED.public_flag,
+    outer_flag = EXCLUDED.outer_flag,
+    facility_description = EXCLUDED.facility_description,
+    authority_setting_flg = EXCLUDED.authority_setting_flg,
+    updated_at = CURRENT_TIMESTAMP,
+    deleted_at = NULL;
 
-Step 3: test in Postman
------------------------
-Request:
+INSERT INTO files (
+  file_id, file_name, file_path, file_type, file_size, s3_bucket, created_at, deleted_at
+) VALUES
+  (300501, 'parent-list-300100.jpg', '/300501', 'vr_image', 1000, 'parent-list-test', CURRENT_TIMESTAMP, NULL),
+  (300502, 'parent-list-300110.jpg', '/300502', 'vr_image', 1000, 'parent-list-test', CURRENT_TIMESTAMP, NULL),
+  (300503, 'parent-list-300111.jpg', '/300503', 'vr_image', 1000, 'parent-list-test', CURRENT_TIMESTAMP, NULL),
+  (300504, 'parent-list-300112.jpg', '/300504', 'vr_image', 1000, 'parent-list-test', CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (file_id) DO UPDATE
+SET deleted_at = NULL;
 
-GET http://localhost:8081/facilities?parentId=<lowest_level_facility_id>
-Authorization: Bearer <USER01 access_token>
+INSERT INTO facility_images (
+  image_id, facility_id, file_id, image_name, shooting_height, ceiling_height,
+  created_at, updated_at, deleted_at
+) VALUES
+  (300601, 300100, 300501, 'parent-list-300100.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300602, 300110, 300502, 'parent-list-300110.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300603, 300111, 300503, 'parent-list-300111.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300604, 300112, 300504, 'parent-list-300112.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (image_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-Expected response:
+INSERT INTO annotations (
+  annotation_id, facility_id, annotation_type, annotation_title, annotation_content,
+  created_by, display_expire_type, display_expire_at, yaw, pitch,
+  created_at, updated_at, deleted_at
+) VALUES
+  (300701, 300100, '10', 'emergency 300100', 'emergency annotation', 'parent-list-test', FALSE, NULL, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300702, 300100, '20', 'normal 300100', 'normal annotation', 'parent-list-test', FALSE, NULL, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300703, 300110, '20', 'normal 300110', 'normal annotation', 'parent-list-test', FALSE, NULL, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300704, 300111, '10', 'emergency 300111', 'emergency annotation', 'parent-list-test', FALSE, NULL, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300705, 300112, '20', 'normal 300112', 'normal annotation', 'parent-list-test', FALSE, NULL, 5, 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (annotation_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-{
-  "success": true,
-  "error_code": null,
-  "message": "ok",
-  "data": []
-}
+INSERT INTO equipments (
+  equipment_id, facility_id, equipment_master_id, yaw, pitch,
+  created_at, updated_at, deleted_at
+) VALUES
+  (300801, 300100, 300001, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300802, 300110, 300001, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300803, 300111, 300001, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300804, 300112, 300001, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (equipment_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-8-1 Response Parameters
-=======================
+INSERT INTO facility_role_permission (
+  facility_role_permission_id, permission_id, facility_id, keycloak_role_id, keycloak_role_name,
+  created_at, updated_at, deleted_at
+) VALUES
+  (300901, 20, 300100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300902, 30, 300100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300903, 50, 300100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300904, 20, 300200, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300905, 20, 300110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300906, 30, 300110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300907, 50, 300110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300908, 20, 300111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300909, 30, 300111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300910, 50, 300111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300911, 20, 300112, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300912, 30, 300112, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (300913, 50, 300112, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (facility_role_permission_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-8-1-1 Data count
-----------------
-Meaning:
-Because this is the lowest-level facility, there are no child facilities.
-The response data count must be 0.
+SELECT setval(pg_get_serial_sequence('facilities_tree', 'facility_id'), COALESCE((SELECT MAX(facility_id) FROM facilities_tree), 1), true);
+SELECT setval(pg_get_serial_sequence('files', 'file_id'), COALESCE((SELECT MAX(file_id) FROM files), 1), true);
+SELECT setval(pg_get_serial_sequence('facility_images', 'image_id'), COALESCE((SELECT MAX(image_id) FROM facility_images), 1), true);
+SELECT setval(pg_get_serial_sequence('annotations', 'annotation_id'), COALESCE((SELECT MAX(annotation_id) FROM annotations), 1), true);
+SELECT setval(pg_get_serial_sequence('equipments', 'equipment_id'), COALESCE((SELECT MAX(equipment_id) FROM equipments), 1), true);
+SELECT setval(pg_get_serial_sequence('facility_role_permission', 'facility_role_permission_id'), COALESCE((SELECT MAX(facility_role_permission_id) FROM facility_role_permission), 1), true);
 
-SQL used for comparison:
+COMMIT;
 
-SELECT *
-FROM facilities_tree
-WHERE parent_id = <lowest_level_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
 
-Expected:
-The SQL returns 0 rows.
-The API returns data: [].
-
-2 List GET direct child facilities of a child facility, SYS_ADMIN
-=================================================================
-
-Excel section:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=上記で取得した子ファシリティのID
-（SYS_ADMINロールを持つユーザ）
-
-Endpoint:
-GET /facilities?parentId=<child_facility_id_as_parent>
-
-User:
-SYS_ADMIN access token
-
-Meaning:
-Use one child facility ID returned from section 1 as the next `parentId`.
-The response checks are the same as section 1-2, but the parent ID changes from Top facility ID to the selected child facility ID.
-
-Find a child facility ID from section 1
+Before Testing: Confirm Prepared DB Tree
 ---------------------------------------
 
 SQL:
 
 SELECT
-  facility_id AS child_facility_id,
-  parent_id,
-  facility_name
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Pick one `child_facility_id`.
-
-Optional: choose one that also has children
-------------------------------------------
-
-If you want data count greater than 0, choose a child facility that has its own child facilities.
-
-SQL:
-
-SELECT
-  p.facility_id AS child_facility_id_as_parent,
-  p.facility_name AS child_facility_name,
-  COUNT(c.facility_id) AS grandchild_count
-FROM facilities_tree p
-JOIN facilities_tree c
-  ON c.parent_id = p.facility_id
-WHERE p.parent_id = <top_facility_id>
-  AND p.deleted_at IS NULL
-  AND c.deleted_at IS NULL
-GROUP BY p.facility_id, p.facility_name
-ORDER BY p.facility_id;
-
-Postman request
----------------
-
-Method:
-GET
-
-URL:
-http://localhost:8081/facilities?parentId=<child_facility_id_as_parent>
-
-Headers:
-Authorization: Bearer <SYS_ADMIN access_token>
-
-2-1 Response Parameters
------------------------
-
-2-1-1 Data count
-----------------
-Check:
-Same as 1-2-1, but use `<child_facility_id_as_parent>` as the parent ID.
-
-SQL:
-
-SELECT *
-FROM facilities_tree
-WHERE parent_id = <child_facility_id_as_parent>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-- `data` is an array.
-- `data.length` equals the SQL result count.
-- If the SQL result is 0, response is normal with `data: []`.
-
-2-1-2 facility_id
------------------
-Check:
-Same as 1-2-2. `data[].facility_id` must match the SQL result.
-
-SQL:
-
-SELECT facility_id
-FROM facilities_tree
-WHERE parent_id = <child_facility_id_as_parent>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-2-1-3 parent_id
----------------
-Check:
-Same as 1-2-3. Every `data[].parent_id` must equal `<child_facility_id_as_parent>`.
-
-SQL:
-
-SELECT facility_id, parent_id
-FROM facilities_tree
-WHERE parent_id = <child_facility_id_as_parent>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-2-1-4 facility_name
--------------------
-Check:
-Same as 1-2-4. `data[].facility_name` must match `facilities_tree.facility_name`.
-
-SQL:
-
-SELECT facility_id, facility_name
-FROM facilities_tree
-WHERE parent_id = <child_facility_id_as_parent>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-2-1-5 publish_mode
-------------------
-Check:
-Same as 1-2-5. `data[].publish_mode` must match `facilities_tree.public_flag`.
-
-SQL:
-
-SELECT facility_id, public_flag
-FROM facilities_tree
-WHERE parent_id = <child_facility_id_as_parent>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-2-1-6 is_outdoor
-----------------
-Check:
-Same as 1-2-6. `data[].is_outdoor` must match `facilities_tree.outer_flag`.
-
-SQL:
-
-SELECT facility_id, outer_flag
-FROM facilities_tree
-WHERE parent_id = <child_facility_id_as_parent>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-2-1-7 has_vr_image
-------------------
-Check:
-Same as 1-2-7 for each facility returned by 2-1-1.
-
-SQL for one returned facility:
-
-SELECT COUNT(*) AS vr_image_count
-FROM facilities_tree ft
-JOIN facility_images fi
-  ON fi.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND ft.deleted_at IS NULL
-  AND fi.deleted_at IS NULL;
-
-2-1-8 has_emergency_annotation
-------------------------------
-Check:
-Same as 1-2-8 for each facility returned by 2-1-1.
-
-SQL for one returned facility:
-
-SELECT COUNT(*) AS emergency_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND a.annotation_type = '10'
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL;
-
-2-1-9 has_normal_annotation
----------------------------
-Check:
-Same as 1-2-9 for each facility returned by 2-1-1.
-
-SQL for one returned facility:
-
-SELECT COUNT(*) AS normal_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND a.annotation_type <> '10'
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL;
-
-2-1-10 has_equipment
---------------------
-Check:
-Same as 1-2-10 for each facility returned by 2-1-1.
-
-SQL for one returned facility:
-
-SELECT COUNT(*) AS equipment_count
-FROM facilities_tree ft
-JOIN equipments e
-  ON e.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND ft.deleted_at IS NULL
-  AND e.deleted_at IS NULL;
-
-2-1-11 created_at
------------------
-Check:
-Same as 1-2-11. `data[].created_at` must match `facilities_tree.created_at`.
-
-SQL:
-
-SELECT facility_id, created_at
-FROM facilities_tree
-WHERE parent_id = <child_facility_id_as_parent>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-2-1-12 updated_at
------------------
-Check:
-Same as 1-2-12. `data[].updated_at` must match `facilities_tree.updated_at`.
-
-SQL:
-
-SELECT facility_id, updated_at
-FROM facilities_tree
-WHERE parent_id = <child_facility_id_as_parent>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-2-1-13 deleted_at
------------------
-Check:
-Same as 1-2-13. Because this API only returns active rows, `data[].deleted_at` should normally be null.
-
-SQL:
-
-SELECT facility_id, deleted_at
-FROM facilities_tree
-WHERE parent_id = <child_facility_id_as_parent>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-3 List GET direct child facilities just above the lowest level, SYS_ADMIN
-========================================================================
-
-Excel section:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=最下層直上のファシリティのID
-（SYS_ADMINロールを持つユーザ）
-
-Endpoint:
-GET /facilities?parentId=<parent_facility_id_above_lowest_level>
-
-User:
-SYS_ADMIN access token
-
-Meaning:
-Use a facility ID whose direct children are lowest-level facilities.
-The response checks are the same as section 1-2, but the chosen parent is the facility directly above the lowest level.
-
-Find a parent facility directly above the lowest level
-------------------------------------------------------
-
-Option A: use is_leaf.
-
-SQL:
-
-SELECT
-  p.facility_id AS parent_facility_id_above_lowest_level,
-  p.facility_name AS parent_facility_name,
-  COUNT(c.facility_id) AS leaf_child_count
-FROM facilities_tree p
-JOIN facilities_tree c
-  ON c.parent_id = p.facility_id
-WHERE p.deleted_at IS NULL
-  AND c.deleted_at IS NULL
-  AND c.is_leaf = TRUE
-GROUP BY p.facility_id, p.facility_name
-ORDER BY p.facility_id;
-
-Pick one `parent_facility_id_above_lowest_level`.
-
-Option B: use tree_level.
-
-SQL:
-
-SELECT
-  p.facility_id AS parent_facility_id_above_lowest_level,
-  p.facility_name AS parent_facility_name,
-  p.tree_level AS parent_tree_level,
-  MAX(c.tree_level) AS child_tree_level
-FROM facilities_tree p
-JOIN facilities_tree c
-  ON c.parent_id = p.facility_id
-WHERE p.deleted_at IS NULL
-  AND c.deleted_at IS NULL
-GROUP BY p.facility_id, p.facility_name, p.tree_level
-ORDER BY child_tree_level DESC, p.facility_id;
-
-Postman request
----------------
-
-Method:
-GET
-
-URL:
-http://localhost:8081/facilities?parentId=<parent_facility_id_above_lowest_level>
-
-Headers:
-Authorization: Bearer <SYS_ADMIN access_token>
-
-3-1 Response Parameters
------------------------
-
-3-1-1 Data count
-----------------
-Check:
-Same as 1-2-1, but use `<parent_facility_id_above_lowest_level>` as the parent ID.
-
-SQL:
-
-SELECT *
-FROM facilities_tree
-WHERE parent_id = <parent_facility_id_above_lowest_level>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected:
-- `data` is an array.
-- `data.length` equals the SQL result count.
-- Returned children should be lowest-level facilities for this test case.
-
-3-1-2 facility_id
------------------
-Check:
-Same as 1-2-2. `data[].facility_id` must match the SQL result.
-
-SQL:
-
-SELECT facility_id
-FROM facilities_tree
-WHERE parent_id = <parent_facility_id_above_lowest_level>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-3-1-3 parent_id
----------------
-Check:
-Same as 1-2-3. Every `data[].parent_id` must equal `<parent_facility_id_above_lowest_level>`.
-
-SQL:
-
-SELECT facility_id, parent_id
-FROM facilities_tree
-WHERE parent_id = <parent_facility_id_above_lowest_level>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-3-1-4 facility_name
--------------------
-Check:
-Same as 1-2-4. `data[].facility_name` must match `facilities_tree.facility_name`.
-
-SQL:
-
-SELECT facility_id, facility_name
-FROM facilities_tree
-WHERE parent_id = <parent_facility_id_above_lowest_level>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-3-1-5 publish_mode
-------------------
-Check:
-Same as 1-2-5. `data[].publish_mode` must match `facilities_tree.public_flag`.
-
-SQL:
-
-SELECT facility_id, public_flag
-FROM facilities_tree
-WHERE parent_id = <parent_facility_id_above_lowest_level>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-3-1-6 is_outdoor
-----------------
-Check:
-Same as 1-2-6. `data[].is_outdoor` must match `facilities_tree.outer_flag`.
-
-SQL:
-
-SELECT facility_id, outer_flag
-FROM facilities_tree
-WHERE parent_id = <parent_facility_id_above_lowest_level>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-3-1-7 has_vr_image
-------------------
-Check:
-Same as 1-2-7 for each facility returned by 3-1-1.
-
-SQL for one returned facility:
-
-SELECT COUNT(*) AS vr_image_count
-FROM facilities_tree ft
-JOIN facility_images fi
-  ON fi.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND ft.deleted_at IS NULL
-  AND fi.deleted_at IS NULL;
-
-3-1-8 has_emergency_annotation
-------------------------------
-Check:
-Same as 1-2-8 for each facility returned by 3-1-1.
-
-SQL for one returned facility:
-
-SELECT COUNT(*) AS emergency_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND a.annotation_type = '10'
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL;
-
-3-1-9 has_normal_annotation
----------------------------
-Check:
-Same as 1-2-9 for each facility returned by 3-1-1.
-
-SQL for one returned facility:
-
-SELECT COUNT(*) AS normal_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND a.annotation_type <> '10'
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL;
-
-3-1-10 has_equipment
---------------------
-Check:
-Same as 1-2-10 for each facility returned by 3-1-1.
-
-SQL for one returned facility:
-
-SELECT COUNT(*) AS equipment_count
-FROM facilities_tree ft
-JOIN equipments e
-  ON e.facility_id = ft.facility_id
-WHERE ft.facility_id = <returned_facility_id>
-  AND ft.deleted_at IS NULL
-  AND e.deleted_at IS NULL;
-
-3-1-11 created_at
------------------
-Check:
-Same as 1-2-11. `data[].created_at` must match `facilities_tree.created_at`.
-
-SQL:
-
-SELECT facility_id, created_at
-FROM facilities_tree
-WHERE parent_id = <parent_facility_id_above_lowest_level>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-3-1-12 updated_at
------------------
-Check:
-Same as 1-2-12. `data[].updated_at` must match `facilities_tree.updated_at`.
-
-SQL:
-
-SELECT facility_id, updated_at
-FROM facilities_tree
-WHERE parent_id = <parent_facility_id_above_lowest_level>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-3-1-13 deleted_at
------------------
-Check:
-Same as 1-2-13. Because this API only returns active rows, `data[].deleted_at` should normally be null.
-
-SQL:
-
-SELECT facility_id, deleted_at
-FROM facilities_tree
-WHERE parent_id = <parent_facility_id_above_lowest_level>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-4 List GET direct child facilities of lowest-level facility, SYS_ADMIN
-=====================================================================
-
-Excel section:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=最下層のファシリティのID
-（SYS_ADMINロールを持つユーザ）
-
-Endpoint:
-GET /facilities?parentId=<lowest_level_facility_id>
-
-User:
-SYS_ADMIN access token
-
-Meaning:
-Use a lowest-level facility ID. Because it has no child facilities, the API must return a normal response with 0 records.
-
-Find a lowest-level facility ID
--------------------------------
-
-Option A: use is_leaf.
-
-SQL:
-
-SELECT
-  facility_id AS lowest_level_facility_id,
+  facility_id,
   parent_id,
   facility_name,
   tree_level,
-  is_leaf
+  is_leaf,
+  sort_order,
+  deleted_at
 FROM facilities_tree
-WHERE deleted_at IS NULL
-  AND is_leaf = TRUE
-ORDER BY facility_id;
-
-Option B: confirm the selected facility has no children.
-
-SQL:
-
-SELECT COUNT(*) AS child_count
-FROM facilities_tree
-WHERE parent_id = <lowest_level_facility_id>
-  AND deleted_at IS NULL;
+WHERE facility_id BETWEEN 300000 AND 300999
+ORDER BY tree_level ASC, sort_order ASC, facility_id ASC;
 
 Expected:
-child_count = 0
+300000 root, 300100 and 300200 direct children, 300110 child, 300111 above lowest, 300112 lowest.
+All deleted_at values are NULL.
 
-Postman request
----------------
 
-Method:
-GET
-
-URL:
-http://localhost:8081/facilities?parentId=<lowest_level_facility_id>
-
-Headers:
-Authorization: Bearer <SYS_ADMIN access_token>
-
-4-1 Response Parameters
------------------------
-
-4-1-1 Data count
-----------------
-Meaning:
-There are no child facilities, so the data count must be 0.
-
-SQL:
-
-SELECT *
-FROM facilities_tree
-WHERE parent_id = <lowest_level_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-Expected response:
-
-{
-  "success": true,
-  "error_code": null,
-  "message": "ok",
-  "data": []
-}
-
-Check:
-- HTTP status is 200.
-- success is true.
-- error_code is null.
-- data is an empty array.
-
-5 List GET direct child facilities of top-level facility, USER01
-================================================================
-
-Excel section:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=TopレベルファシリティのID
-（USER01）
-
-Endpoint:
-GET /facilities?parentId=<top_facility_id>
-
-User:
-USER01 access token
-
-Meaning:
-For a normal user, the API must return only child facilities where the login user has a matching facility role permission row.
-
-Before Postman: confirm USER01 role
------------------------------------
-
-Call:
-GET http://localhost:8081/api/keycloak/me
-
-Headers:
-Authorization: Bearer <USER01 access_token>
-
-Expected:
-The response roles include the role used in DB, for example:
-
-R_USER01
-
-Find a top facility whose children are visible to USER01
--------------------------------------------------------
+Before Testing: Confirm USER01 Permission Data
+---------------------------------------------
 
 SQL:
 
 SELECT
-  p.facility_id AS top_facility_id,
-  p.facility_name AS top_facility_name,
-  COUNT(DISTINCT c.facility_id) AS visible_child_count
-FROM facilities_tree p
-JOIN facilities_tree c
-  ON c.parent_id = p.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = c.facility_id
-WHERE p.deleted_at IS NULL
-  AND c.deleted_at IS NULL
-  AND frp.deleted_at IS NULL
-  AND frp.keycloak_role_id IN ('R_USER01')
-GROUP BY p.facility_id, p.facility_name
-HAVING COUNT(DISTINCT c.facility_id) > 0
-ORDER BY p.facility_id;
+  facility_id,
+  permission_id,
+  keycloak_role_id,
+  deleted_at
+FROM facility_role_permission
+WHERE facility_id BETWEEN 300000 AND 300999
+  AND keycloak_role_id = 'R_USER01'
+ORDER BY facility_id, permission_id;
 
-Use one returned top_facility_id in Postman.
+Expected:
+Rows exist for facilities 300100, 300200, 300110, 300111, 300112.
+All deleted_at values are NULL.
 
-Expected child facilities from DB
----------------------------------
 
-SQL:
+Common Response Check SQL
+-------------------------
+
+Use this SQL to calculate expected response rows for SYS_ADMIN.
+Replace <parent_id>.
+
+SELECT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  ft.public_flag AS publish_mode,
+  ft.outer_flag AS is_outdoor,
+  EXISTS (
+    SELECT 1 FROM facility_images fi
+    WHERE fi.facility_id = ft.facility_id
+      AND fi.deleted_at IS NULL
+  ) AS has_vr_image,
+  EXISTS (
+    SELECT 1 FROM annotations a
+    WHERE a.facility_id = ft.facility_id
+      AND a.annotation_type = '10'
+      AND a.deleted_at IS NULL
+  ) AS has_emergency_annotation,
+  EXISTS (
+    SELECT 1 FROM annotations a
+    WHERE a.facility_id = ft.facility_id
+      AND a.annotation_type <> '10'
+      AND a.deleted_at IS NULL
+  ) AS has_normal_annotation,
+  EXISTS (
+    SELECT 1 FROM equipments e
+    WHERE e.facility_id = ft.facility_id
+      AND e.deleted_at IS NULL
+  ) AS has_equipment,
+  ft.created_at,
+  ft.updated_at,
+  ft.deleted_at
+FROM facilities_tree ft
+WHERE ft.parent_id = <parent_id>
+  AND ft.deleted_at IS NULL
+ORDER BY ft.sort_order ASC, ft.facility_id ASC;
+
+Expected:
+Postman data count and row values match this SQL.
+
+
+Common USER01 Response Check SQL
+--------------------------------
+
+Use this SQL to calculate expected response rows for USER01.
+Replace <parent_id>.
 
 SELECT DISTINCT
   ft.facility_id,
   ft.parent_id,
   ft.facility_name,
-  ft.public_flag,
-  ft.outer_flag,
+  ft.public_flag AS publish_mode,
+  ft.outer_flag AS is_outdoor,
+  (
+    EXISTS (
+      SELECT 1 FROM facility_images fi
+      WHERE fi.facility_id = ft.facility_id
+        AND fi.deleted_at IS NULL
+    )
+    AND EXISTS (
+      SELECT 1 FROM facility_role_permission frp_vr
+      WHERE frp_vr.facility_id = ft.facility_id
+        AND frp_vr.permission_id = 20
+        AND frp_vr.keycloak_role_id IN ('R_USER01')
+        AND frp_vr.deleted_at IS NULL
+    )
+  ) AS has_vr_image,
+  (
+    EXISTS (
+      SELECT 1 FROM annotations a
+      WHERE a.facility_id = ft.facility_id
+        AND a.annotation_type = '10'
+        AND a.deleted_at IS NULL
+    )
+    AND EXISTS (
+      SELECT 1 FROM facility_role_permission frp_ann
+      WHERE frp_ann.facility_id = ft.facility_id
+        AND frp_ann.permission_id IN (30, 40)
+        AND frp_ann.keycloak_role_id IN ('R_USER01')
+        AND frp_ann.deleted_at IS NULL
+    )
+  ) AS has_emergency_annotation,
+  (
+    EXISTS (
+      SELECT 1 FROM annotations a
+      WHERE a.facility_id = ft.facility_id
+        AND a.annotation_type <> '10'
+        AND a.deleted_at IS NULL
+    )
+    AND EXISTS (
+      SELECT 1 FROM facility_role_permission frp_ann
+      WHERE frp_ann.facility_id = ft.facility_id
+        AND frp_ann.permission_id IN (30, 40)
+        AND frp_ann.keycloak_role_id IN ('R_USER01')
+        AND frp_ann.deleted_at IS NULL
+    )
+  ) AS has_normal_annotation,
+  (
+    EXISTS (
+      SELECT 1 FROM equipments e
+      WHERE e.facility_id = ft.facility_id
+        AND e.deleted_at IS NULL
+    )
+    AND EXISTS (
+      SELECT 1 FROM facility_role_permission frp_eq
+      WHERE frp_eq.facility_id = ft.facility_id
+        AND frp_eq.permission_id = 50
+        AND frp_eq.keycloak_role_id IN ('R_USER01')
+        AND frp_eq.deleted_at IS NULL
+    )
+  ) AS has_equipment,
   ft.created_at,
   ft.updated_at,
   ft.deleted_at
 FROM facilities_tree ft
 JOIN facility_role_permission frp
   ON frp.facility_id = ft.facility_id
-WHERE ft.parent_id = <top_facility_id>
+ AND frp.keycloak_role_id IN ('R_USER01')
+ AND frp.deleted_at IS NULL
+WHERE ft.parent_id = <parent_id>
   AND ft.deleted_at IS NULL
-  AND frp.deleted_at IS NULL
-  AND frp.keycloak_role_id IN ('R_USER01')
 ORDER BY ft.sort_order ASC, ft.facility_id ASC;
 
-Postman request
----------------
+Expected:
+Postman data count and row values match this SQL.
 
-Method:
-GET
 
-URL:
-http://localhost:8081/facilities?parentId=<top_facility_id>
+Case 1: SYS_ADMIN, Top Level Parent
+----------------------------------
+
+Excel:
+一覧取得（直下施設一覧）
+GET /facilities?parentId=TopレベルファシリティのID
+SYS_ADMIN role user
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=300000
 
 Headers:
-Authorization: Bearer <USER01 access_token>
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
 
-5-2 Response Parameters
------------------------
+Expected response:
+success = true
+data contains direct children 300100 and 300200 ordered by sort_order.
 
-5-2-1 Data count
-----------------
-Check:
-data count must match the expected child facilities SQL above.
+Check SQL:
 
-5-2-2 facility_id
------------------
-Check:
-data[].facility_id must match facilities_tree.facility_id from the expected child facilities SQL.
-
-5-2-3 parent_id
----------------
-Check:
-data[].parent_id must match the requested top_facility_id.
-
-5-2-4 facility_name
--------------------
-Check:
-data[].facility_name must match facilities_tree.facility_name.
-
-5-2-5 publish_mode
-------------------
-Check:
-data[].publish_mode must match facilities_tree.public_flag.
-
-5-2-6 is_outdoor
-----------------
-Check:
-data[].is_outdoor must match facilities_tree.outer_flag.
-
-5-2-7 has_vr_image
-------------------
-Meaning:
-For USER01, this is true only when the child facility has VR image data and USER01 has VR image view permission.
-
-SQL:
-
-SELECT COUNT(*) AS visible_vr_image_count
-FROM facilities_tree ft
-JOIN facility_images fi
-  ON fi.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <child_facility_id>
-  AND frp.permission_id = 20
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND fi.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-Expected:
-count >= 1 means has_vr_image is true.
-count = 0 means has_vr_image is false.
-
-5-2-8 has_emergency_annotation
-------------------------------
-Meaning:
-For USER01, this is true only when the child facility has emergency annotation data and USER01 has annotation view or edit permission.
-
-SQL:
-
-SELECT COUNT(*) AS visible_emergency_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <child_facility_id>
-  AND a.annotation_type = '10'
-  AND frp.permission_id IN (30, 40)
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-Expected:
-count >= 1 means has_emergency_annotation is true.
-count = 0 means has_emergency_annotation is false.
-
-5-2-9 has_normal_annotation
----------------------------
-Meaning:
-For USER01, this is true only when the child facility has non-emergency annotation data and USER01 has annotation view or edit permission.
-
-SQL:
-
-SELECT COUNT(*) AS visible_normal_annotation_count
-FROM facilities_tree ft
-JOIN annotations a
-  ON a.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <child_facility_id>
-  AND a.annotation_type <> '10'
-  AND frp.permission_id IN (30, 40)
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND a.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-Expected:
-count >= 1 means has_normal_annotation is true.
-count = 0 means has_normal_annotation is false.
-
-5-2-10 has_equipment
---------------------
-Meaning:
-For USER01, this is true only when the child facility has equipment data and USER01 has equipment view permission.
-
-SQL:
-
-SELECT COUNT(*) AS visible_equipment_count
-FROM facilities_tree ft
-JOIN equipments e
-  ON e.facility_id = ft.facility_id
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
-WHERE ft.facility_id = <child_facility_id>
-  AND frp.permission_id = 50
-  AND frp.keycloak_role_id IN ('R_USER01')
-  AND ft.deleted_at IS NULL
-  AND e.deleted_at IS NULL
-  AND frp.deleted_at IS NULL;
-
-Expected:
-count >= 1 means has_equipment is true.
-count = 0 means has_equipment is false.
-
-5-2-11 created_at
------------------
-Check:
-data[].created_at must match facilities_tree.created_at.
-
-SQL:
-
-SELECT facility_id, created_at
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-5-2-12 updated_at
------------------
-Check:
-data[].updated_at must match facilities_tree.updated_at.
-
-SQL:
-
-SELECT facility_id, updated_at
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-
-5-2-13 deleted_at
------------------
-Check:
-Because this API only returns active rows, data[].deleted_at should normally be null.
-
-SQL:
-
-SELECT facility_id, deleted_at
-FROM facilities_tree
-WHERE parent_id = <top_facility_id>
-  AND deleted_at IS NULL
-ORDER BY sort_order ASC, facility_id ASC;
-## 2. List Direct Child Facilities By Child Facility ID
-
-Japanese test title:
-一覧取得（直下施設一覧）
-GET /facilities?parentId=上記で取得した子ファシリティのID
-（SYS_ADMINロールを持つユーザ）
-
-### 2-0. Find The Required parentId
-
-First find a top-level facility that has child facilities.
-Use one `child_facility_id` from this SQL result as `<parentId_for_case_2>`.
-
-```sql
-SELECT
-  p.facility_id AS top_parent_id,
-  p.facility_name AS top_parent_name,
-  c.facility_id AS child_facility_id,
-  c.facility_name AS child_facility_name,
-  c.sort_order
-FROM facilities_tree p
-JOIN facilities_tree c
-  ON c.parent_id = p.facility_id
-WHERE p.deleted_at IS NULL
-  AND c.deleted_at IS NULL
-ORDER BY p.facility_id, c.sort_order, c.facility_id;
-```
-
-Then confirm which records the API should return:
-
-```sql
 SELECT
   facility_id,
   parent_id,
   facility_name,
-  public_flag,
-  outer_flag,
-  created_at,
-  updated_at,
+  public_flag AS publish_mode,
+  outer_flag AS is_outdoor,
+  sort_order,
   deleted_at
 FROM facilities_tree
-WHERE parent_id = <parentId_for_case_2>
+WHERE parent_id = 300000
   AND deleted_at IS NULL
-ORDER BY sort_order, facility_id;
-```
+ORDER BY sort_order ASC, facility_id ASC;
 
-### 2-1. Response Parameters
+Expected:
+Rows 300100, 300200.
 
-Postman request:
 
-```text
-GET http://localhost:8081/facilities?parentId=<parentId_for_case_2>
-Authorization: Bearer <SYS_ADMIN access_token>
-```
+Case 2: SYS_ADMIN, Child Facility Parent
+---------------------------------------
 
-Expected basic response:
+Excel:
+一覧取得（直下施設一覧）
+GET /facilities?parentId=上記で取得した子ファシリティのID
+SYS_ADMIN role user
 
-```json
+Use child from Case 1:
+<child_facility_id> = 300100
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=300100
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Check SQL:
+
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  public_flag AS publish_mode,
+  outer_flag AS is_outdoor,
+  sort_order,
+  deleted_at
+FROM facilities_tree
+WHERE parent_id = 300100
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+Expected:
+Row 300110.
+
+
+Case 3: SYS_ADMIN, Facility Just Above Lowest Level
+--------------------------------------------------
+
+Excel:
+一覧取得（直下施設一覧）
+GET /facilities?parentId=最下層直上のファシリティのID
+SYS_ADMIN role user
+
+Use:
+<above_lowest_facility_id> = 300111
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=300111
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Check SQL:
+
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  public_flag AS publish_mode,
+  outer_flag AS is_outdoor,
+  sort_order,
+  deleted_at
+FROM facilities_tree
+WHERE parent_id = 300111
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+Expected:
+Row 300112.
+
+
+Case 4: SYS_ADMIN, Lowest Level Parent
+-------------------------------------
+
+Excel:
+一覧取得（直下施設一覧）
+GET /facilities?parentId=最下層のファシリティのID
+SYS_ADMIN role user
+
+Use:
+<lowest_facility_id> = 300112
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=300112
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Check SQL:
+
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  deleted_at
+FROM facilities_tree
+WHERE parent_id = 300112
+  AND deleted_at IS NULL
+ORDER BY sort_order ASC, facility_id ASC;
+
+Expected:
+0 rows.
+Postman data = [].
+
+
+Case 5: USER01, Top Level Parent
+-------------------------------
+
+Excel:
+一覧取得（直下施設一覧）
+GET /facilities?parentId=TopレベルファシリティのID
+USER01
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=300000
+
+Headers:
+Authorization: Bearer <USER01_ACCESS_TOKEN>
+
+Check SQL:
+
+SELECT DISTINCT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  ft.public_flag AS publish_mode,
+  ft.outer_flag AS is_outdoor,
+  ft.sort_order,
+  ft.deleted_at
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.keycloak_role_id IN ('R_USER01')
+ AND frp.deleted_at IS NULL
+WHERE ft.parent_id = 300000
+  AND ft.deleted_at IS NULL
+ORDER BY ft.sort_order ASC, ft.facility_id ASC;
+
+Expected:
+Rows 300100, 300200.
+
+
+Case 6: USER01, Child Facility Parent
+------------------------------------
+
+Excel:
+一覧取得（直下施設一覧）
+GET /facilities?parentId=上記で取得した子ファシリティのID
+USER01
+
+Use child from Case 5:
+<child_facility_id> = 300100
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=300100
+
+Headers:
+Authorization: Bearer <USER01_ACCESS_TOKEN>
+
+Check SQL:
+
+SELECT DISTINCT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  ft.public_flag AS publish_mode,
+  ft.outer_flag AS is_outdoor,
+  ft.sort_order,
+  ft.deleted_at
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.keycloak_role_id IN ('R_USER01')
+ AND frp.deleted_at IS NULL
+WHERE ft.parent_id = 300100
+  AND ft.deleted_at IS NULL
+ORDER BY ft.sort_order ASC, ft.facility_id ASC;
+
+Expected:
+Row 300110.
+
+
+Case 7: USER01, Facility Just Above Lowest Level
+-----------------------------------------------
+
+Excel:
+一覧取得（直下施設一覧）
+GET /facilities?parentId=最下層直上のファシリティのID
+USER01
+
+Use:
+<above_lowest_facility_id> = 300111
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=300111
+
+Headers:
+Authorization: Bearer <USER01_ACCESS_TOKEN>
+
+Check SQL:
+
+SELECT DISTINCT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  ft.public_flag AS publish_mode,
+  ft.outer_flag AS is_outdoor,
+  ft.sort_order,
+  ft.deleted_at
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.keycloak_role_id IN ('R_USER01')
+ AND frp.deleted_at IS NULL
+WHERE ft.parent_id = 300111
+  AND ft.deleted_at IS NULL
+ORDER BY ft.sort_order ASC, ft.facility_id ASC;
+
+Expected:
+Row 300112.
+
+
+Case 8: USER01, Lowest Level Parent
+----------------------------------
+
+Excel:
+一覧取得（直下施設一覧）
+GET /facilities?parentId=最下層のファシリティのID
+USER01
+
+Use:
+<lowest_facility_id> = 300112
+
+Postman:
+
+GET http://localhost:8081/facilities?parentId=300112
+
+Headers:
+Authorization: Bearer <USER01_ACCESS_TOKEN>
+
+Check SQL:
+
+SELECT DISTINCT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  ft.deleted_at
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.keycloak_role_id IN ('R_USER01')
+ AND frp.deleted_at IS NULL
+WHERE ft.parent_id = 300112
+  AND ft.deleted_at IS NULL
+ORDER BY ft.sort_order ASC, ft.facility_id ASC;
+
+Expected:
+0 rows.
+Postman data = [].
+
+
+Response Fields To Compare For Every Non-Empty Case
+---------------------------------------------------
+
+For SYS_ADMIN cases, use "Common Response Check SQL" with the case parent_id.
+For USER01 cases, use "Common USER01 Response Check SQL" with the case parent_id.
+
+Compare these fields:
+- data[].facility_id = facilities_tree.facility_id
+- data[].parent_id = facilities_tree.parent_id
+- data[].facility_name = facilities_tree.facility_name
+- data[].publish_mode = facilities_tree.public_flag
+- data[].is_outdoor = facilities_tree.outer_flag
+- data[].has_vr_image = calculated SQL has_vr_image
+- data[].has_emergency_annotation = calculated SQL has_emergency_annotation
+- data[].has_normal_annotation = calculated SQL has_normal_annotation
+- data[].has_equipment = calculated SQL has_equipment
+- data[].created_at = facilities_tree.created_at formatted by API
+- data[].updated_at = facilities_tree.updated_at formatted by API
+- data[].deleted_at = null
+
+Expected common response wrapper:
+
 {
   "success": true,
   "error_code": null,
   "message": "ok",
+  "errors": null,
   "data": []
 }
-```
-
-`data` should contain the same records as the SQL above.
-
-Check each returned row:
-
-- 2-1-1 `data` count: matches the SQL result count.
-- 2-1-2 `facility_id`: matches `facilities_tree.facility_id`.
-- 2-1-3 `parent_id`: matches `facilities_tree.parent_id` and equals `<parentId_for_case_2>`.
-- 2-1-4 `facility_name`: matches `facilities_tree.facility_name`.
-- 2-1-5 `publish_mode`: matches the API mapping from `facilities_tree.public_flag`.
-- 2-1-6 `is_outdoor`: matches `facilities_tree.outer_flag`.
-- 2-1-7 `has_vr_image`: true if the SQL count below is 1 or more, otherwise false.
-- 2-1-8 `has_emergency_annotation`: true if the SQL count below is 1 or more, otherwise false.
-- 2-1-9 `has_normal_annotation`: true if the SQL count below is 1 or more, otherwise false.
-- 2-1-10 `has_equipment`: true if the SQL count below is 1 or more, otherwise false.
-- 2-1-11 `created_at`: matches `facilities_tree.created_at`.
-- 2-1-12 `updated_at`: matches `facilities_tree.updated_at`.
-- 2-1-13 `deleted_at`: matches `facilities_tree.deleted_at`.
-
-Flag check SQL for each returned `facility_id`:
-
-```sql
--- has_vr_image
-SELECT COUNT(*) AS has_vr_image_count
-FROM facility_images
-WHERE facility_id = <returned_facility_id>
-  AND deleted_at IS NULL;
-
--- has_emergency_annotation
-SELECT COUNT(*) AS emergency_annotation_count
-FROM annotations
-WHERE facility_id = <returned_facility_id>
-  AND annotation_type = '10'
-  AND deleted_at IS NULL;
-
--- has_normal_annotation
-SELECT COUNT(*) AS normal_annotation_count
-FROM annotations
-WHERE facility_id = <returned_facility_id>
-  AND annotation_type <> '10'
-  AND deleted_at IS NULL;
-
--- has_equipment
-SELECT COUNT(*) AS equipment_count
-FROM equipments
-WHERE facility_id = <returned_facility_id>
-  AND deleted_at IS NULL;
-```
-
-## 2. GET /facilities?parentId=<child facility id> (SYS_ADMIN) - added 2026-07-24
-
-Purpose:
-Use one child facility returned from section 1 as the next `parentId`. The API response must match the direct children of that child facility.
-
-Find the required child facility id:
-
-```sql
-SELECT
-  p.facility_id AS top_parent_id,
-  p.facility_name AS top_parent_name,
-  c.facility_id AS parent_id_for_case_2,
-  c.facility_name AS child_facility_name,
-  c.sort_order
-FROM facilities_tree p
-JOIN facilities_tree c ON c.parent_id = p.facility_id
-WHERE p.deleted_at IS NULL
-  AND c.deleted_at IS NULL
-ORDER BY p.facility_id, c.sort_order, c.facility_id;
-```
-
-Use `parent_id_for_case_2` in Postman.
-
-Postman request:
-
-```http
-GET http://localhost:8081/facilities?parentId=<parent_id_for_case_2>
-Authorization: Bearer <SYS_ADMIN access_token>
-```
-
-Expected DB rows:
-
-```sql
-SELECT
-  facility_id,
-  parent_id,
-  facility_name,
-  public_flag,
-  outer_flag,
-  created_at,
-  updated_at,
-  deleted_at
-FROM facilities_tree
-WHERE parent_id = <parent_id_for_case_2>
-  AND deleted_at IS NULL
-ORDER BY sort_order, facility_id;
-```
-
-2-1 response checks:
-
-- 2-1-1 `data` count equals the SQL row count.
-- 2-1-2 `facility_id` equals `facilities_tree.facility_id`.
-- 2-1-3 `parent_id` equals `<parent_id_for_case_2>`.
-- 2-1-4 `facility_name` equals `facilities_tree.facility_name`.
-- 2-1-5 `publish_mode` matches `facilities_tree.public_flag` after API conversion.
-- 2-1-6 `is_outdoor` equals `facilities_tree.outer_flag`.
-- 2-1-11 `created_at` equals `facilities_tree.created_at`.
-- 2-1-12 `updated_at` equals `facilities_tree.updated_at`.
-- 2-1-13 `deleted_at` equals `facilities_tree.deleted_at`.
-
-Boolean checks for each returned facility:
-
-```sql
-SELECT COUNT(*) AS has_vr_image_count
-FROM facility_images
-WHERE facility_id = <returned_facility_id>
-  AND deleted_at IS NULL;
-
-SELECT COUNT(*) AS emergency_annotation_count
-FROM annotations
-WHERE facility_id = <returned_facility_id>
-  AND annotation_type = '10'
-  AND deleted_at IS NULL;
-
-SELECT COUNT(*) AS normal_annotation_count
-FROM annotations
-WHERE facility_id = <returned_facility_id>
-  AND annotation_type <> '10'
-  AND deleted_at IS NULL;
-
-SELECT COUNT(*) AS equipment_count
-FROM equipments
-WHERE facility_id = <returned_facility_id>
-  AND deleted_at IS NULL;
-```
-
-- 2-1-7 `has_vr_image` is true when `has_vr_image_count >= 1`, otherwise false.
-- 2-1-8 `has_emergency_annotation` is true when `emergency_annotation_count >= 1`, otherwise false.
-- 2-1-9 `has_normal_annotation` is true when `normal_annotation_count >= 1`, otherwise false.
-- 2-1-10 `has_equipment` is true when `equipment_count >= 1`, otherwise false.
-
-Column note:
-
-- Excel `PARENT_FACILITY_ID` means DB `parent_id`.
-- Excel `NODE_NAME` means DB `facility_name`.
-
