@@ -808,27 +808,20 @@ Do not delete physical/S3 files manually for this API test.
 Excel expects physical files are not removed by the API.
 
 
-Cases 1-2-2, 1-2-18, 1-2-20: facilities_tree deleted_at
+Case 1-2-2: target facility deleted_at
 
-Check target, children, and descendants:
+Check the requested delete target:
 
-WITH RECURSIVE targets AS (
-    SELECT facility_id, parent_id, facility_name, deleted_at
-    FROM facilities_tree
-    WHERE facility_id = <full_delete_facility_id>
-    UNION ALL
-    SELECT child.facility_id, child.parent_id, child.facility_name, child.deleted_at
-    FROM facilities_tree child
-    JOIN targets parent
-      ON child.parent_id = parent.facility_id
-)
-SELECT *
-FROM targets
-ORDER BY facility_id;
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  deleted_at
+FROM facilities_tree
+WHERE facility_id = <full_delete_facility_id>;
 
 Expected:
-All returned rows have deleted_at IS NOT NULL.
-
+The returned row has deleted_at IS NOT NULL.
 
 Case 1-2-3: facility_role_permission deleted_at
 
@@ -989,12 +982,236 @@ Physical files are not deleted.
 Only DB files.deleted_at is updated.
 
 
-Cases 1-2-19 and 1-2-21: child/descendant related data
+Case 1-2-18: child facility deleted_at
 
-Use the same related-table SQL above with <target_facility_ids>.
+Excel meaning:
+Facilities where parent_id = deleted facility_id are soft-deleted.
+
+Check direct children of the requested delete target:
+
+SELECT
+  facility_id,
+  parent_id,
+  facility_name,
+  deleted_at
+FROM facilities_tree
+WHERE parent_id = <full_delete_facility_id>
+ORDER BY facility_id;
 
 Expected:
-All related rows for children and descendants are soft-deleted.
+All returned child rows have deleted_at IS NOT NULL.
+This means DELETED_AT = true / deleted in the Excel check.
+
+
+Case 1-2-19: child related data deleted_at
+
+Find direct child facility IDs:
+
+SELECT facility_id
+FROM facilities_tree
+WHERE parent_id = <full_delete_facility_id>
+ORDER BY facility_id;
+
+For the prepared DB data, expected child IDs:
+9300110, 9300120
+
+Run this SQL using the child IDs:
+
+WITH child_ids AS (
+  SELECT unnest(ARRAY[9300110, 9300120]::BIGINT[]) AS facility_id
+)
+SELECT
+  (SELECT COUNT(*)
+   FROM facility_role_permission
+   WHERE facility_id IN (SELECT facility_id FROM child_ids)
+     AND deleted_at IS NULL) AS active_role_count,
+
+  (SELECT COUNT(*)
+   FROM annotations
+   WHERE facility_id IN (SELECT facility_id FROM child_ids)
+     AND deleted_at IS NULL) AS active_annotation_count,
+
+  (SELECT COUNT(*)
+   FROM annotation_files af
+   JOIN annotations a ON a.annotation_id = af.annotation_id
+   WHERE a.facility_id IN (SELECT facility_id FROM child_ids)
+     AND af.deleted_at IS NULL) AS active_annotation_file_count,
+
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN annotation_files af ON af.file_id = f.file_id
+   JOIN annotations a ON a.annotation_id = af.annotation_id
+   WHERE a.facility_id IN (SELECT facility_id FROM child_ids)
+     AND f.deleted_at IS NULL) AS active_annotation_linked_file_count,
+
+  (SELECT COUNT(*)
+   FROM annotation_comments ac
+   JOIN annotations a ON a.annotation_id = ac.annotation_id
+   WHERE a.facility_id IN (SELECT facility_id FROM child_ids)
+     AND ac.deleted_at IS NULL) AS active_annotation_comment_count,
+
+  (SELECT COUNT(*)
+   FROM facility_images
+   WHERE facility_id IN (SELECT facility_id FROM child_ids)
+     AND deleted_at IS NULL) AS active_facility_image_count,
+
+  (SELECT COUNT(*)
+   FROM hotspots h
+   JOIN facility_images fi ON fi.image_id = h.image_id
+   WHERE fi.facility_id IN (SELECT facility_id FROM child_ids)
+     AND h.deleted_at IS NULL) AS active_hotspot_count,
+
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN facility_images fi ON fi.file_id = f.file_id
+   WHERE fi.facility_id IN (SELECT facility_id FROM child_ids)
+     AND f.deleted_at IS NULL) AS active_image_file_count,
+
+  (SELECT COUNT(*)
+   FROM equipments
+   WHERE facility_id IN (SELECT facility_id FROM child_ids)
+     AND deleted_at IS NULL) AS active_equipment_count,
+
+  (SELECT COUNT(*)
+   FROM map_points
+   WHERE (facility_id IN (SELECT facility_id FROM child_ids)
+      OR target_id IN (SELECT facility_id FROM child_ids))
+     AND deleted_at IS NULL) AS active_map_point_count,
+
+  (SELECT COUNT(*)
+   FROM maps
+   WHERE facility_id IN (SELECT facility_id FROM child_ids)
+     AND deleted_at IS NULL) AS active_map_count,
+
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN maps m ON m.file_id = f.file_id
+   WHERE m.facility_id IN (SELECT facility_id FROM child_ids)
+     AND f.deleted_at IS NULL) AS active_map_file_count;
+
+Expected:
+All active_* counts = 0.
+
+
+Case 1-2-20: descendant facility deleted_at
+
+Check target, children, and all descendants:
+
+WITH RECURSIVE targets AS (
+    SELECT facility_id, parent_id, facility_name, deleted_at
+    FROM facilities_tree
+    WHERE facility_id = <full_delete_facility_id>
+    UNION ALL
+    SELECT child.facility_id, child.parent_id, child.facility_name, child.deleted_at
+    FROM facilities_tree child
+    JOIN targets parent
+      ON child.parent_id = parent.facility_id
+)
+SELECT *
+FROM targets
+ORDER BY facility_id;
+
+Expected:
+All returned rows have deleted_at IS NOT NULL.
+
+
+Case 1-2-21: descendant related data deleted_at
+
+Find descendant facility IDs under the requested delete target:
+
+WITH RECURSIVE descendants AS (
+    SELECT facility_id, parent_id
+    FROM facilities_tree
+    WHERE parent_id = <full_delete_facility_id>
+    UNION ALL
+    SELECT child.facility_id, child.parent_id
+    FROM facilities_tree child
+    JOIN descendants parent
+      ON child.parent_id = parent.facility_id
+)
+SELECT facility_id
+FROM descendants
+ORDER BY facility_id;
+
+For the prepared DB data, expected descendant IDs:
+9300110, 9300111, 9300120
+
+Run this SQL using the descendant IDs:
+
+WITH descendant_ids AS (
+  SELECT unnest(ARRAY[9300110, 9300111, 9300120]::BIGINT[]) AS facility_id
+)
+SELECT
+  (SELECT COUNT(*)
+   FROM facility_role_permission
+   WHERE facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND deleted_at IS NULL) AS active_role_count,
+
+  (SELECT COUNT(*)
+   FROM annotations
+   WHERE facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND deleted_at IS NULL) AS active_annotation_count,
+
+  (SELECT COUNT(*)
+   FROM annotation_files af
+   JOIN annotations a ON a.annotation_id = af.annotation_id
+   WHERE a.facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND af.deleted_at IS NULL) AS active_annotation_file_count,
+
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN annotation_files af ON af.file_id = f.file_id
+   JOIN annotations a ON a.annotation_id = af.annotation_id
+   WHERE a.facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND f.deleted_at IS NULL) AS active_annotation_linked_file_count,
+
+  (SELECT COUNT(*)
+   FROM annotation_comments ac
+   JOIN annotations a ON a.annotation_id = ac.annotation_id
+   WHERE a.facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND ac.deleted_at IS NULL) AS active_annotation_comment_count,
+
+  (SELECT COUNT(*)
+   FROM facility_images
+   WHERE facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND deleted_at IS NULL) AS active_facility_image_count,
+
+  (SELECT COUNT(*)
+   FROM hotspots h
+   JOIN facility_images fi ON fi.image_id = h.image_id
+   WHERE fi.facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND h.deleted_at IS NULL) AS active_hotspot_count,
+
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN facility_images fi ON fi.file_id = f.file_id
+   WHERE fi.facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND f.deleted_at IS NULL) AS active_image_file_count,
+
+  (SELECT COUNT(*)
+   FROM equipments
+   WHERE facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND deleted_at IS NULL) AS active_equipment_count,
+
+  (SELECT COUNT(*)
+   FROM map_points
+   WHERE (facility_id IN (SELECT facility_id FROM descendant_ids)
+      OR target_id IN (SELECT facility_id FROM descendant_ids))
+     AND deleted_at IS NULL) AS active_map_point_count,
+
+  (SELECT COUNT(*)
+   FROM maps
+   WHERE facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND deleted_at IS NULL) AS active_map_count,
+
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN maps m ON m.file_id = f.file_id
+   WHERE m.facility_id IN (SELECT facility_id FROM descendant_ids)
+     AND f.deleted_at IS NULL) AS active_map_file_count;
+
+Expected:
+All active_* counts = 0.
 
 
 Case 1-3: Response for full delete
