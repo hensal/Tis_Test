@@ -2448,7 +2448,7 @@ WHERE image_id = <source_image_id>;
 Before copy: save source FILES values
 
 SELECT file_id, file_name, file_path, file_type,
-       file_size, s3_bucket, created_at, updated_at, deleted_at
+       file_size, s3_bucket, created_at, deleted_at
 FROM files
 WHERE file_id = <source_vr_file_id>;
 
@@ -2546,7 +2546,7 @@ The copied FILES file_id is newly generated.
 SQL:
 
 SELECT file_id, file_name, file_path, file_type,
-       file_size, s3_bucket, created_at, updated_at, deleted_at
+       file_size, s3_bucket, created_at, deleted_at
 FROM files
 WHERE file_id = <copied_vr_file_id>;
 
@@ -2589,6 +2589,10 @@ Case 1-4-31: copied FILES created_at
 
 Expected:
 copied FILES created_at is the POST execution time.
+
+Note:
+According to DB設計.md, FILES table does not have updated_at.
+Do not check updated_at for FILES.
 
 SQL:
 
@@ -2784,7 +2788,7 @@ WHERE map_id = <source_map_id>;
 Before copy: save source FILES values
 
 SELECT file_id, file_name, file_path, file_type,
-       file_size, s3_bucket, created_at, updated_at, deleted_at
+       file_size, s3_bucket, created_at, deleted_at
 FROM files
 WHERE file_id = <source_map_file_id>;
 
@@ -2886,7 +2890,7 @@ The copied FILES file_id is newly generated.
 SQL:
 
 SELECT file_id, file_name, file_path, file_type,
-       file_size, s3_bucket, created_at, updated_at, deleted_at
+       file_size, s3_bucket, created_at, deleted_at
 FROM files
 WHERE file_id = <copied_map_file_id>;
 
@@ -2929,6 +2933,10 @@ Case 1-4-51: copied FILES created_at
 
 Expected:
 copied FILES created_at is the POST execution time.
+
+Note:
+According to DB設計.md, FILES table does not have updated_at.
+Do not check updated_at for FILES.
 
 SQL:
 

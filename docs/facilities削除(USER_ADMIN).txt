@@ -55,6 +55,120 @@ No body is required.
 All body request parameters are ignored.
 
 
+Before Testing: Create Required Delete Test DB Data
+
+First run the SYS_ADMIN delete setup SQL:
+
+docs/facilities削除(SYS_ADMIN).txt
+
+Section:
+Before Testing: Create Required Delete Test DB Data
+
+That setup creates:
+<full_delete_facility_id> = 9300100
+<simple_delete_facility_id> = 9300200
+
+It also creates facility_role_permission permission_id = 10 with keycloak_role_id = R_USER01
+for both prepared delete targets.
+
+If your USER_ADMIN token role is not R_USER01, replace R_USER01 below with your actual role.
+
+
+Before Testing: Create USER_ADMIN No-Permission Target
+
+Purpose:
+Excel case 1-1-8 needs a facility where permission_id = 10 does not exist for the USER_ADMIN role.
+Use this target only for the no-permission error test.
+
+Prepared ID:
+<no_permission_facility_id> = 9300300
+
+SQL:
+
+BEGIN;
+
+INSERT INTO facilities_tree (
+  facility_id, parent_id, facility_name, sort_order, tree_level, is_leaf,
+  public_flag, outer_flag, facility_description, authority_setting_flg,
+  created_at, updated_at, deleted_at
+) VALUES (
+  9300300, 9300000, 'delete_user_no_permission_target', 30000000, 2, TRUE,
+  '01', FALSE, 'USER_ADMIN no permission delete target', FALSE,
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+)
+ON CONFLICT (facility_id) DO UPDATE
+SET parent_id = EXCLUDED.parent_id,
+    facility_name = EXCLUDED.facility_name,
+    sort_order = EXCLUDED.sort_order,
+    tree_level = EXCLUDED.tree_level,
+    is_leaf = EXCLUDED.is_leaf,
+    public_flag = EXCLUDED.public_flag,
+    outer_flag = EXCLUDED.outer_flag,
+    facility_description = EXCLUDED.facility_description,
+    authority_setting_flg = EXCLUDED.authority_setting_flg,
+    updated_at = CURRENT_TIMESTAMP,
+    deleted_at = NULL;
+
+UPDATE facility_role_permission
+SET deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE facility_id = 9300300
+  AND permission_id = 10
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+SELECT setval(
+  pg_get_serial_sequence('facilities_tree', 'facility_id'),
+  COALESCE((SELECT MAX(facility_id) FROM facilities_tree), 1),
+  true
+);
+
+COMMIT;
+
+
+Before Testing: Find Facilities Having USER_ADMIN Permission
+
+Replace R_USER01 with your USER_ADMIN token role if different.
+
+SQL:
+
+SELECT
+  ft.facility_id,
+  ft.parent_id,
+  ft.facility_name,
+  frp.permission_id,
+  frp.keycloak_role_id
+FROM facilities_tree ft
+JOIN facility_role_permission frp
+  ON frp.facility_id = ft.facility_id
+ AND frp.permission_id = 10
+ AND frp.keycloak_role_id IN ('R_USER01')
+ AND frp.deleted_at IS NULL
+WHERE ft.deleted_at IS NULL
+ORDER BY ft.facility_id;
+
+Expected prepared rows:
+facility_id = 9300100
+facility_id = 9300200
+
+
+Before Testing: Confirm No-Permission Target
+
+Replace R_USER01 with your USER_ADMIN token role if different.
+
+SQL:
+
+SELECT COUNT(*) AS edit_permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 9300300
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+edit_permission_count = 0
+
+
 Before Testing: Find USER_ADMIN Role Values
 
 Decode the USER_ADMIN access token.
@@ -84,6 +198,17 @@ ORDER BY facility_id;
 
 Use one facility_id as:
 <request_facility_id>
+
+Prepared success IDs:
+For full delete success, use:
+<request_facility_id> = 9300100
+
+For simple delete success, use:
+<request_facility_id> = 9300200
+
+Prepared no-permission ID:
+For permission_denied test, use:
+<request_facility_id> = 9300300
 
 
 2. Find a non-existing facility ID.
@@ -240,9 +365,28 @@ WHERE permission_id = 10
 Expected:
 edit_permission_count = 0
 
+Concrete SQL for prepared no-permission target:
+
+SELECT COUNT(*) AS edit_permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 9300300
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+edit_permission_count = 0
+
 Step 2: Send request.
 
 POST http://localhost:8081/facilities/<request_facility_id>
+
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+
+Concrete Postman example:
+
+POST http://localhost:8081/facilities/9300300
 
 Headers:
 Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
@@ -300,6 +444,13 @@ POST http://localhost:8081/facilities/<full_delete_facility_id>
 Headers:
 Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
 
+Concrete Postman example using prepared full delete target:
+
+POST http://localhost:8081/facilities/9300100
+
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+
 Before sending, confirm permission:
 
 SELECT COUNT(*) AS edit_permission_count
@@ -312,8 +463,23 @@ WHERE permission_id = 10
 Expected:
 edit_permission_count >= 1
 
+Concrete permission check for prepared full delete target:
+
+SELECT COUNT(*) AS edit_permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 9300100
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+edit_permission_count >= 1
+
 Expected DB result:
 Target, children, descendants, and related rows are soft-deleted.
+
+After sending Postman:
+Use the SYS_ADMIN document one-query verification for Excel rows 1-2-2 through 1-2-21.
 
 
 Case 1-3: Response for full delete
@@ -340,11 +506,33 @@ POST http://localhost:8081/facilities/<simple_delete_facility_id>
 Headers:
 Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
 
+Concrete Postman example using prepared simple delete target:
+
+POST http://localhost:8081/facilities/9300200
+
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+
 Before sending, confirm permission_id = 10 exists for <simple_delete_facility_id>.
+
+Concrete permission check for prepared simple delete target:
+
+SELECT COUNT(*) AS edit_permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 9300200
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+edit_permission_count >= 1
 
 Expected:
 The target facilities_tree row has deleted_at IS NOT NULL.
 Any related rows that exist for that facility also have deleted_at IS NOT NULL.
+
+After sending Postman:
+Use the SYS_ADMIN document one-query verification for prepared simple delete target 9300200.
 
 
 Case 1-5: Response for simple delete

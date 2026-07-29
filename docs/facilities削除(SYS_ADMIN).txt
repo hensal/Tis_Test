@@ -42,6 +42,326 @@ No body is required.
 Excel says all body request parameters are ignored.
 
 
+Before Testing: Create Required Delete Test DB Data
+
+Purpose:
+Create fixed test data that satisfies the Excel delete requirements on any computer.
+
+Prepared IDs:
+<full_delete_facility_id> = 9300100
+Full delete children = 9300110, 9300120
+Full delete grandchild = 9300111
+<simple_delete_facility_id> = 9300200
+
+Important DB design note:
+DB設計.md does not define annotation_files.deleted_at, but the Excel delete sheet checks
+ANNOTATION_FILES.DELETED_AT. The setup below adds annotation_files.deleted_at if it is missing,
+so the Excel check can be executed.
+
+SQL:
+
+BEGIN;
+
+ALTER TABLE annotation_files
+ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+INSERT INTO permission_master (
+  permission_id, permission_name, created_at, updated_at, deleted_at
+) VALUES
+  (10, '施設編集', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (20, 'VR画像参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (30, '付箋参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (40, '付箋追加・変更・削除', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (50, '設備参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (permission_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipment_types (
+  equipment_type_id, equipment_type_name, created_at, updated_at, deleted_at
+) VALUES
+  (9300001, '削除テスト設備種別', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (equipment_type_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipment_masters (
+  equipment_master_id, equipment_type_id, equipment_name,
+  equipment_info_json, equipment_info_html,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9300001, 9300001, '削除テスト設備', '{"type":"delete-test"}', '<p>delete test</p>', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (equipment_master_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO annotation_type_master (
+  annotation_type, annotation_type_name, created_at, updated_at, deleted_at
+) VALUES
+  ('10', '一般', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  ('20', '緊急', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (annotation_type) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO facilities_tree (
+  facility_id, parent_id, facility_name, sort_order, tree_level, is_leaf,
+  public_flag, outer_flag, facility_description, authority_setting_flg,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9300000, NULL, 'delete_test_root', 93000000, 1, FALSE, '01', FALSE, 'delete test root', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9300100, 9300000, 'delete_full_target', 10000000, 2, FALSE, '01', FALSE, 'full delete target', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9300110, 9300100, 'delete_full_child_1', 10000000, 3, FALSE, '01', FALSE, 'full delete child 1', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9300111, 9300110, 'delete_full_grandchild_1', 10000000, 4, TRUE, '01', FALSE, 'full delete grandchild 1', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9300120, 9300100, 'delete_full_child_2', 20000000, 3, TRUE, '01', FALSE, 'full delete child 2', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9300200, 9300000, 'delete_simple_target', 20000000, 2, TRUE, '01', FALSE, 'simple delete target', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (facility_id) DO UPDATE
+SET parent_id = EXCLUDED.parent_id,
+    facility_name = EXCLUDED.facility_name,
+    sort_order = EXCLUDED.sort_order,
+    tree_level = EXCLUDED.tree_level,
+    is_leaf = EXCLUDED.is_leaf,
+    public_flag = EXCLUDED.public_flag,
+    outer_flag = EXCLUDED.outer_flag,
+    facility_description = EXCLUDED.facility_description,
+    authority_setting_flg = EXCLUDED.authority_setting_flg,
+    updated_at = CURRENT_TIMESTAMP,
+    deleted_at = NULL;
+
+INSERT INTO files (
+  file_id, file_name, file_path, file_type, file_size, s3_bucket, created_at, deleted_at
+) VALUES
+  (9301001, 'delete-vr-target.jpg', '/9301001', 'vr_image', 1001, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301002, 'delete-map-target.png', '/9301002', 'map_image', 1002, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301003, 'delete-annotation-target.pdf', '/9301003', 'annotation', 1003, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301011, 'delete-vr-child.jpg', '/9301011', 'vr_image', 1011, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301012, 'delete-map-child.png', '/9301012', 'map_image', 1012, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301013, 'delete-annotation-child.pdf', '/9301013', 'annotation', 1013, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301021, 'delete-vr-grandchild.jpg', '/9301021', 'vr_image', 1021, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301022, 'delete-map-grandchild.png', '/9301022', 'map_image', 1022, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301023, 'delete-annotation-grandchild.pdf', '/9301023', 'annotation', 1023, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301031, 'delete-vr-child2.jpg', '/9301031', 'vr_image', 1031, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301032, 'delete-map-child2.png', '/9301032', 'map_image', 1032, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9301033, 'delete-annotation-child2.pdf', '/9301033', 'annotation', 1033, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9302001, 'delete-simple-vr.jpg', '/9302001', 'vr_image', 2001, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL),
+  (9302002, 'delete-simple-map.png', '/9302002', 'map_image', 2002, 'delete-test-bucket', CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (file_id) DO UPDATE
+SET deleted_at = NULL;
+
+INSERT INTO facility_images (
+  image_id, facility_id, file_id, image_name, shooting_height, ceiling_height,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9303001, 9300100, 9301001, 'delete-vr-target.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9303011, 9300110, 9301011, 'delete-vr-child.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9303021, 9300111, 9301021, 'delete-vr-grandchild.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9303031, 9300120, 9301031, 'delete-vr-child2.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9303201, 9300200, 9302001, 'delete-simple-vr.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (image_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO hotspots (
+  hotspot_id, image_id, target_id, yaw, pitch, created_at, updated_at, deleted_at
+) VALUES
+  (9304001, 9303001, 9300110, 10, 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9304011, 9303011, 9300111, 10, 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9304021, 9303021, 9300100, 10, 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9304031, 9303031, 9300100, 10, 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9304201, 9303201, 9300200, 10, 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (hotspot_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO maps (
+  map_id, facility_id, file_id, map_name, image_width, image_height,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9305001, 9300100, 9301002, 'delete-map-target.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9305011, 9300110, 9301012, 'delete-map-child.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9305021, 9300111, 9301022, 'delete-map-grandchild.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9305031, 9300120, 9301032, 'delete-map-child2.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9305201, 9300200, 9302002, 'delete-simple-map.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (map_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO map_points (
+  map_point_id, map_id, facility_id, x, y, target_id,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9306001, 9305001, 9300100, 10, 10, 9300110, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9306011, 9305011, 9300110, 20, 20, 9300111, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9306021, 9305021, 9300111, 30, 30, 9300100, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9306031, 9305031, 9300120, 40, 40, 9300100, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9306201, 9305201, 9300200, 50, 50, 9300200, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (map_point_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO facility_role_permission (
+  facility_role_permission_id, permission_id, facility_id, keycloak_role_id, keycloak_role_name,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9307001, 10, 9300100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9307002, 20, 9300100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9307011, 10, 9300110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9307021, 10, 9300111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9307031, 10, 9300120, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9307201, 10, 9300200, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (facility_role_permission_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipments (
+  equipment_id, facility_id, equipment_master_id, yaw, pitch,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9308001, 9300100, 9300001, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9308011, 9300110, 9300001, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9308021, 9300111, 9300001, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9308031, 9300120, 9300001, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9308201, 9300200, 9300001, 5, 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (equipment_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO annotations (
+  annotation_id, facility_id, annotation_type, annotation_title, annotation_content,
+  created_by, display_expire_type, display_expire_at, yaw, pitch,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9309001, 9300100, '10', 'delete target', 'delete target annotation', 'delete-test', FALSE, NULL, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9309011, 9300110, '10', 'delete child', 'delete child annotation', 'delete-test', FALSE, NULL, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9309021, 9300111, '10', 'delete grandchild', 'delete grandchild annotation', 'delete-test', FALSE, NULL, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9309031, 9300120, '10', 'delete child2', 'delete child2 annotation', 'delete-test', FALSE, NULL, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (annotation_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO annotation_comments (
+  annotation_comment_id, annotation_id, comment_text, created_by, created_at, deleted_at
+) VALUES
+  (9310001, 9309001, 'delete target comment', 'delete-test', CURRENT_TIMESTAMP, NULL),
+  (9310011, 9309011, 'delete child comment', 'delete-test', CURRENT_TIMESTAMP, NULL),
+  (9310021, 9309021, 'delete grandchild comment', 'delete-test', CURRENT_TIMESTAMP, NULL),
+  (9310031, 9309031, 'delete child2 comment', 'delete-test', CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (annotation_comment_id) DO UPDATE
+SET deleted_at = NULL;
+
+INSERT INTO annotation_files (
+  annotation_file_id, annotation_id, file_id, deleted_at
+) VALUES
+  (9311001, 9309001, 9301003, NULL),
+  (9311011, 9309011, 9301013, NULL),
+  (9311021, 9309021, 9301023, NULL),
+  (9311031, 9309031, 9301033, NULL)
+ON CONFLICT (annotation_file_id) DO UPDATE
+SET deleted_at = NULL;
+
+SELECT setval(pg_get_serial_sequence('facilities_tree', 'facility_id'), COALESCE((SELECT MAX(facility_id) FROM facilities_tree), 1), true);
+SELECT setval(pg_get_serial_sequence('files', 'file_id'), COALESCE((SELECT MAX(file_id) FROM files), 1), true);
+SELECT setval(pg_get_serial_sequence('facility_images', 'image_id'), COALESCE((SELECT MAX(image_id) FROM facility_images), 1), true);
+SELECT setval(pg_get_serial_sequence('hotspots', 'hotspot_id'), COALESCE((SELECT MAX(hotspot_id) FROM hotspots), 1), true);
+SELECT setval(pg_get_serial_sequence('maps', 'map_id'), COALESCE((SELECT MAX(map_id) FROM maps), 1), true);
+SELECT setval(pg_get_serial_sequence('map_points', 'map_point_id'), COALESCE((SELECT MAX(map_point_id) FROM map_points), 1), true);
+SELECT setval(pg_get_serial_sequence('facility_role_permission', 'facility_role_permission_id'), COALESCE((SELECT MAX(facility_role_permission_id) FROM facility_role_permission), 1), true);
+SELECT setval(pg_get_serial_sequence('equipments', 'equipment_id'), COALESCE((SELECT MAX(equipment_id) FROM equipments), 1), true);
+SELECT setval(pg_get_serial_sequence('annotations', 'annotation_id'), COALESCE((SELECT MAX(annotation_id) FROM annotations), 1), true);
+SELECT setval(pg_get_serial_sequence('annotation_comments', 'annotation_comment_id'), COALESCE((SELECT MAX(annotation_comment_id) FROM annotation_comments), 1), true);
+SELECT setval(pg_get_serial_sequence('annotation_files', 'annotation_file_id'), COALESCE((SELECT MAX(annotation_file_id) FROM annotation_files), 1), true);
+
+COMMIT;
+
+
+Before Testing: Fetch Prepared Delete IDs
+
+Find the prepared full delete target:
+
+SELECT facility_id, parent_id, facility_name, deleted_at
+FROM facilities_tree
+WHERE facility_id = 9300100
+  AND deleted_at IS NULL;
+
+Use:
+<full_delete_facility_id> = 9300100
+
+Find the prepared simple delete target:
+
+SELECT facility_id, parent_id, facility_name, deleted_at
+FROM facilities_tree
+WHERE facility_id = 9300200
+  AND deleted_at IS NULL;
+
+Use:
+<simple_delete_facility_id> = 9300200
+
+Confirm the prepared full target has children, grandchildren, and related data:
+
+WITH RECURSIVE targets AS (
+  SELECT facility_id, parent_id, facility_name
+  FROM facilities_tree
+  WHERE facility_id = 9300100
+    AND deleted_at IS NULL
+  UNION ALL
+  SELECT child.facility_id, child.parent_id, child.facility_name
+  FROM facilities_tree child
+  JOIN targets parent
+    ON child.parent_id = parent.facility_id
+  WHERE child.deleted_at IS NULL
+)
+SELECT
+  COUNT(DISTINCT t.facility_id) AS target_tree_count,
+  COUNT(DISTINCT child.facility_id) AS direct_child_count,
+  COUNT(DISTINCT grandchild.facility_id) AS grandchild_count,
+  COUNT(DISTINCT frp.facility_role_permission_id) AS role_count,
+  COUNT(DISTINCT fi.image_id) AS image_count,
+  COUNT(DISTINCT h.hotspot_id) AS hotspot_count,
+  COUNT(DISTINCT m.map_id) AS map_count,
+  COUNT(DISTINCT mp.map_point_id) AS map_point_count,
+  COUNT(DISTINCT e.equipment_id) AS equipment_count,
+  COUNT(DISTINCT a.annotation_id) AS annotation_count,
+  COUNT(DISTINCT ac.annotation_comment_id) AS annotation_comment_count,
+  COUNT(DISTINCT af.annotation_file_id) AS annotation_file_count
+FROM targets t
+LEFT JOIN facilities_tree child
+  ON child.parent_id = 9300100
+ AND child.deleted_at IS NULL
+LEFT JOIN facilities_tree grandchild
+  ON grandchild.parent_id = child.facility_id
+ AND grandchild.deleted_at IS NULL
+LEFT JOIN facility_role_permission frp
+  ON frp.facility_id = t.facility_id
+ AND frp.deleted_at IS NULL
+LEFT JOIN facility_images fi
+  ON fi.facility_id = t.facility_id
+ AND fi.deleted_at IS NULL
+LEFT JOIN hotspots h
+  ON h.image_id = fi.image_id
+ AND h.deleted_at IS NULL
+LEFT JOIN maps m
+  ON m.facility_id = t.facility_id
+ AND m.deleted_at IS NULL
+LEFT JOIN map_points mp
+  ON (mp.facility_id = t.facility_id OR mp.target_id = t.facility_id)
+ AND mp.deleted_at IS NULL
+LEFT JOIN equipments e
+  ON e.facility_id = t.facility_id
+ AND e.deleted_at IS NULL
+LEFT JOIN annotations a
+  ON a.facility_id = t.facility_id
+ AND a.deleted_at IS NULL
+LEFT JOIN annotation_comments ac
+  ON ac.annotation_id = a.annotation_id
+ AND ac.deleted_at IS NULL
+LEFT JOIN annotation_files af
+  ON af.annotation_id = a.annotation_id
+ AND af.deleted_at IS NULL;
+
+Expected:
+Every count is greater than 0.
+
+
 Before Testing: Find IDs
 
 1. Find an active facility.
@@ -370,6 +690,123 @@ Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
 Body:
 No body. Any body parameters should be ignored.
 
+Concrete Postman example using prepared full delete data:
+
+POST http://localhost:8081/facilities/9300100
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Body:
+No body.
+
+Before sending Postman, save target/descendant IDs:
+
+WITH RECURSIVE targets AS (
+    SELECT facility_id, parent_id, facility_name
+    FROM facilities_tree
+    WHERE facility_id = 9300100
+      AND deleted_at IS NULL
+    UNION ALL
+    SELECT child.facility_id, child.parent_id, child.facility_name
+    FROM facilities_tree child
+    JOIN targets parent
+      ON child.parent_id = parent.facility_id
+    WHERE child.deleted_at IS NULL
+)
+SELECT *
+FROM targets
+ORDER BY facility_id;
+
+Expected IDs:
+9300100, 9300110, 9300111, 9300120
+
+After sending Postman, run this one-query verification for Excel rows 1-2-2 through 1-2-21:
+
+WITH target_ids AS (
+  SELECT unnest(ARRAY[9300100, 9300110, 9300111, 9300120]::BIGINT[]) AS facility_id
+)
+SELECT
+  (SELECT COUNT(*)
+   FROM facilities_tree
+   WHERE facility_id IN (SELECT facility_id FROM target_ids)
+     AND deleted_at IS NULL) AS active_facilities_tree_count,
+
+  (SELECT COUNT(*)
+   FROM facility_role_permission
+   WHERE facility_id IN (SELECT facility_id FROM target_ids)
+     AND deleted_at IS NULL) AS active_role_count,
+
+  (SELECT COUNT(*)
+   FROM annotations
+   WHERE facility_id IN (SELECT facility_id FROM target_ids)
+     AND deleted_at IS NULL) AS active_annotation_count,
+
+  (SELECT COUNT(*)
+   FROM annotation_files af
+   JOIN annotations a ON a.annotation_id = af.annotation_id
+   WHERE a.facility_id IN (SELECT facility_id FROM target_ids)
+     AND af.deleted_at IS NULL) AS active_annotation_file_count,
+
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN annotation_files af ON af.file_id = f.file_id
+   JOIN annotations a ON a.annotation_id = af.annotation_id
+   WHERE a.facility_id IN (SELECT facility_id FROM target_ids)
+     AND f.deleted_at IS NULL) AS active_annotation_linked_file_count,
+
+  (SELECT COUNT(*)
+   FROM annotation_comments ac
+   JOIN annotations a ON a.annotation_id = ac.annotation_id
+   WHERE a.facility_id IN (SELECT facility_id FROM target_ids)
+     AND ac.deleted_at IS NULL) AS active_annotation_comment_count,
+
+  (SELECT COUNT(*)
+   FROM facility_images
+   WHERE facility_id IN (SELECT facility_id FROM target_ids)
+     AND deleted_at IS NULL) AS active_facility_image_count,
+
+  (SELECT COUNT(*)
+   FROM hotspots h
+   JOIN facility_images fi ON fi.image_id = h.image_id
+   WHERE fi.facility_id IN (SELECT facility_id FROM target_ids)
+     AND h.deleted_at IS NULL) AS active_hotspot_count,
+
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN facility_images fi ON fi.file_id = f.file_id
+   WHERE fi.facility_id IN (SELECT facility_id FROM target_ids)
+     AND f.deleted_at IS NULL) AS active_image_file_count,
+
+  (SELECT COUNT(*)
+   FROM equipments
+   WHERE facility_id IN (SELECT facility_id FROM target_ids)
+     AND deleted_at IS NULL) AS active_equipment_count,
+
+  (SELECT COUNT(*)
+   FROM map_points
+   WHERE (facility_id IN (SELECT facility_id FROM target_ids)
+       OR target_id IN (SELECT facility_id FROM target_ids))
+     AND deleted_at IS NULL) AS active_map_point_count,
+
+  (SELECT COUNT(*)
+   FROM maps
+   WHERE facility_id IN (SELECT facility_id FROM target_ids)
+     AND deleted_at IS NULL) AS active_map_count,
+
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN maps m ON m.file_id = f.file_id
+   WHERE m.facility_id IN (SELECT facility_id FROM target_ids)
+     AND f.deleted_at IS NULL) AS active_map_file_count;
+
+Expected:
+All active_* counts = 0.
+
+Physical file check:
+Do not delete physical/S3 files manually for this API test.
+Excel expects physical files are not removed by the API.
+
 
 Cases 1-2-2, 1-2-18, 1-2-20: facilities_tree deleted_at
 
@@ -584,6 +1021,66 @@ Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
 Expected:
 The target facilities_tree row has deleted_at IS NOT NULL.
 Any related rows that exist for that facility also have deleted_at IS NOT NULL.
+
+Concrete Postman example using prepared simple delete data:
+
+POST http://localhost:8081/facilities/9300200
+
+Headers:
+Authorization: Bearer <SYS_ADMIN_ACCESS_TOKEN>
+
+Body:
+No body.
+
+After sending Postman, run this one-query verification:
+
+SELECT
+  (SELECT COUNT(*)
+   FROM facilities_tree
+   WHERE facility_id = 9300200
+     AND deleted_at IS NULL) AS active_facility_count,
+  (SELECT COUNT(*)
+   FROM facility_role_permission
+   WHERE facility_id = 9300200
+     AND deleted_at IS NULL) AS active_role_count,
+  (SELECT COUNT(*)
+   FROM facility_images
+   WHERE facility_id = 9300200
+     AND deleted_at IS NULL) AS active_image_count,
+  (SELECT COUNT(*)
+   FROM hotspots h
+   JOIN facility_images fi ON fi.image_id = h.image_id
+   WHERE fi.facility_id = 9300200
+     AND h.deleted_at IS NULL) AS active_hotspot_count,
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN facility_images fi ON fi.file_id = f.file_id
+   WHERE fi.facility_id = 9300200
+     AND f.deleted_at IS NULL) AS active_image_file_count,
+  (SELECT COUNT(*)
+   FROM maps
+   WHERE facility_id = 9300200
+     AND deleted_at IS NULL) AS active_map_count,
+  (SELECT COUNT(*)
+   FROM files f
+   JOIN maps m ON m.file_id = f.file_id
+   WHERE m.facility_id = 9300200
+     AND f.deleted_at IS NULL) AS active_map_file_count,
+  (SELECT COUNT(*)
+   FROM map_points
+   WHERE (facility_id = 9300200 OR target_id = 9300200)
+     AND deleted_at IS NULL) AS active_map_point_count,
+  (SELECT COUNT(*)
+   FROM equipments
+   WHERE facility_id = 9300200
+     AND deleted_at IS NULL) AS active_equipment_count,
+  (SELECT COUNT(*)
+   FROM annotations
+   WHERE facility_id = 9300200
+     AND deleted_at IS NULL) AS active_annotation_count;
+
+Expected:
+All active_* counts = 0.
 
 
 Case 1-5: Response for simple delete
