@@ -45,21 +45,28 @@ public class FilesService {
 
     private final JdbcTemplate jdbcTemplate;
     private final MinioClient minioClient;
-    private final String minioEndpoint;
+    private final MinioClient publicMinioClient;
+    private final String minioPublicEndpoint;
     private final String minioBucket;
 
     public FilesService(
             JdbcTemplate jdbcTemplate,
-            @Value("${minio.endpoint:http://localhost:9000}") String minioEndpoint,
-            @Value("${minio.access-key:minioadmin}") String minioAccessKey,
-            @Value("${minio.secret-key:minioadmin123}") String minioSecretKey,
-            @Value("${minio.bucket:vr-view-bucket}") String minioBucket
+            @Value("${minio.endpoint}") String minioEndpoint,
+            @Value("${minio.public-endpoint:${minio.endpoint}}") String minioPublicEndpoint,
+            @Value("${minio.access-key}") String minioAccessKey,
+            @Value("${minio.secret-key}") String minioSecretKey,
+            @Value("${minio.bucket}") String minioBucket
     ) {
         this.jdbcTemplate = jdbcTemplate;
-        this.minioEndpoint = trimTrailingSlash(minioEndpoint);
+        String internalEndpoint = trimTrailingSlash(minioEndpoint, "minio.endpoint");
+        this.minioPublicEndpoint = trimTrailingSlash(minioPublicEndpoint, "minio.public-endpoint");
         this.minioBucket = minioBucket;
         this.minioClient = MinioClient.builder()
-                .endpoint(this.minioEndpoint)
+                .endpoint(internalEndpoint)
+                .credentials(minioAccessKey, minioSecretKey)
+                .build();
+        this.publicMinioClient = MinioClient.builder()
+                .endpoint(this.minioPublicEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
     }
@@ -125,7 +132,7 @@ public class FilesService {
         }
 
         try {
-            String downloadUrl = minioClient.getPresignedObjectUrl(
+            String downloadUrl = publicMinioClient.getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
                             .method(Method.GET)
                             .bucket(bucket)
@@ -388,16 +395,16 @@ public class FilesService {
         return value == null ? null : DATE_TIME_FORMATTER.format(value);
     }
 
-    private String trimTrailingSlash(String value) {
+    private String trimTrailingSlash(String value, String propertyName) {
         if (value == null || value.isBlank()) {
-            return "http://localhost:9000";
+            throw new IllegalArgumentException(propertyName + " must be configured");
         }
 
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
     private String getS3BucketUrl() {
-        return minioEndpoint + "/" + minioBucket;
+        return minioPublicEndpoint + "/" + minioBucket;
     }
 
     private String toObjectName(StoredFile file) {

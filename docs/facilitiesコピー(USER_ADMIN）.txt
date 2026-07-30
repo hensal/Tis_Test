@@ -1,783 +1,863 @@
 facilitiesコピー(USER_ADMIN） Postman Test Steps
+===============================================
 
 Source Excel:
 /Users/hensal/Desktop/JAVA_SPRING_BOOT/TEST_CASE/facilities/APIテスト仕様書(facilities).xlsx
 Sheet: facilitiesコピー(USER_ADMIN）
 
-Compared sheet:
-facilitiesコピー(SYS_ADMIN）
-
-
-Summary: Difference From SYS_ADMIN
-
-Most copy test cases are the same as facilitiesコピー(SYS_ADMIN）.
-
-The USER_ADMIN sheet has one extra permission test:
-
-1-1-15:
-facility_idの「10:施設編集」ロールを持っていない
-
-Expected:
-If the logged-in USER_ADMIN user does not have permission_id = 10 for the request facility_id,
-the API should return an error response.
-
-Excel SQL:
-
-SELECT COUNT(*)
-FROM facility_role_permission
-WHERE permission_id = 10
-  AND facility_id = <request_facility_id>
-  AND keycloak_role_id IN (<login_user_role_ids>);
-
-If count = 0, the API should return an error.
-
-
-Current Code Verification
-
-Current code now matches this USER_ADMIN permission requirement.
-
-Reason:
-The copy API now passes Authentication roles to the service and checks edit permission.
-
-Current copy controller:
-
-POST /facilities/{facilityId}/copy
-
-passes:
-
-extractRoleNames(authentication)
-
-Current copy service:
-
-copyFacility(Long facilityId, Map<String, Object> request, Set<String> userRoles)
-
-calls:
-
-ensureEditPermission(facilityId, userRoles)
+Current code note:
+The current backend treats USER_ADMIN like SYS_ADMIN.
+If the bearer token contains USER_ADMIN, the API does not require FACILITY_ROLE_PERMISSION permission_id = 10.
 
 Therefore:
-1. SYS_ADMIN can copy.
-2. USER_ADMIN can copy only when permission_id = 10 exists for the request facility_id and one of the user's roles.
-3. USER_ADMIN without permission_id = 10 should get permission_denied.
+- USER_ADMIN success tests do not need DB permission rows.
+- Excel case 1-1-15 cannot return permission_denied when the token really has USER_ADMIN.
+- To test 1-1-15 permission_denied, use a non-admin token such as R_USER01 with no permission_id = 10 row.
 
-
-Important Endpoint Note
-
-The Excel title says:
-POST /facilities/{facilityid}/move
-
-But this is the copy test sheet.
-In the current backend and facilities.md, the copy endpoint is:
-
-POST /facilities/{facilityId}/copy
-
-Use /copy for Postman copy testing.
-
-
-Common Postman Setup
-
-Portable setup for any computer:
-If the backend runs on another host or port, replace http://localhost:8081 with that computer's backend URL.
-
-Examples:
-http://localhost:8081/facilities/<facilityId>/copy
-http://192.168.1.20:8081/facilities/<facilityId>/copy
-
-Do not hardcode facility IDs from one computer.
-Always run the SQL in this document and in the SYS_ADMIN shared document on the target computer's DB first.
-
-Method:
-POST
-
-Exact endpoint format:
-http://localhost:8081/facilities/<facilityId>/copy
+Endpoint:
+POST http://localhost:8081/facilities/<facilityId>/copy
 
 Headers:
 Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
 Content-Type: application/json
 
-Normal body:
-{
-  "parent_id": <parent_id>,
-  "target_facility_id": null
-}
+
+Fixed IDs For This Document
+---------------------------
+
+FULL copy source:
+<full_source_facility_id> = 9400100
+children = 9400110, 9400120
+grandchild = 9400111
+
+FULL copy destination parent:
+<full_destination_parent_id> = 9400200
+existing child under destination parent = 9400210
+
+Between-copy source with no related data / no children:
+<between_source_facility_id> = 9400500
+<between_parent_id> = 9400600
+<between_target_facility_id> = 9400610
+next child after target = 9400620
+
+Last-copy source:
+<last_source_facility_id> = 9400700
+<last_parent_id> = 9400800
+<last_target_facility_id> = 9400820
+
+No-permission non-admin source:
+<no_permission_source_facility_id> = 9400900
 
 
-Before Testing: Create All Required Copy-Check Data
+0. Create Required DB Data First
+--------------------------------
 
-First run the setup SQL in:
-
-docs/facilitiesコピー(SYS_ADMIN）.txt
-
-Section:
-0. Create all required copy-check data for one FULL copy source.
-
-Then run the finder SQL in the same SYS_ADMIN document:
-
-0-A. Check that the FULL copy source row now exists.
-
-For one-query DB verification of copied vr_image / FILES rows, use the SYS_ADMIN document section:
-
-0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
-One-query verification for Excel 1-4-20 to 1-4-38
-
-For one-query DB verification of copied map / FILES rows, use the SYS_ADMIN document section:
-
-0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
-One-query verification for Excel 1-4-40 to 1-4-59
-
-For one-query DB verification of copied map_point rows, use the SYS_ADMIN document section:
-
-0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
-One-query verification for Excel 1-4-61 to 1-4-69
-
-For one-query DB verification of copied roles / FACILITY_ROLE_PERMISSION rows, use the SYS_ADMIN document section:
-
-0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
-One-query verification for Excel 1-4-70 to 1-4-78
-
-For one-query DB verification of copied equipments rows, use the SYS_ADMIN document section:
-
-0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
-One-query verification for Excel 1-4-79 to 1-4-88
-
-For one-query DB verification that annotations were not copied, use the SYS_ADMIN document section:
-
-0-C. DB checks for Excel 1-4-1 through 1-4-97 using the inserted data
-One-query verification for Excel 1-4-89
-
-Expected:
-At least 1 row is returned.
-Use the returned facility_id as <request_facility_id>.
-
-For the prepared data, facility_id = 1100 should become a valid FULL copy source.
-
-USER_ADMIN extra requirement:
-The USER_ADMIN token must have a Keycloak role that is registered with permission_id = 10
-for the request facility_id.
-
-Check SQL:
-
-SELECT COUNT(*)
-FROM facility_role_permission
-WHERE permission_id = 10
-  AND facility_id = <request_facility_id>
-  AND keycloak_role_id IN ('R_USER01')
-  AND deleted_at IS NULL;
-
-Expected:
-count = 1 or more.
-
-If count = 0, USER_ADMIN copy should return permission_denied.
-
-
-Before Testing: Permission DB Setup And Facility ID Finder
-
-Purpose:
-For USER_ADMIN copy, the request path facility_id must have permission_id = 10
-for one role contained in the USER_ADMIN access token.
-
-Use this section before every USER_ADMIN success test.
-
-Step 1: Decide the role name used by the token.
-
-Example:
-If your USER_ADMIN token contains role R_USER01, use:
-
-<USER_ADMIN_ROLE> = R_USER01
-
-If your token contains role USER_ADMIN, use:
-
-<USER_ADMIN_ROLE> = USER_ADMIN
-
-Important:
-Use the exact role value that appears in the JWT after backend role extraction.
-In many local tests this is:
-
-R_USER01
-
-
-Step 2: Make sure permission_master has permission_id = 10.
+Run this SQL in pgAdmin before testing on any computer.
 
 SQL:
 
+BEGIN;
+
 INSERT INTO permission_master (
-  permission_id,
-  permission_name,
-  created_at,
-  updated_at,
-  deleted_at
-)
-VALUES (
-  10,
-  '施設編集',
-  CURRENT_TIMESTAMP,
-  CURRENT_TIMESTAMP,
-  NULL
-)
+  permission_id, permission_name, created_at, updated_at, deleted_at
+) VALUES
+  (10, '施設編集', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (20, 'VR画像参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (30, '付箋参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (40, '付箋追加・変更・削除', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (50, '設備参照', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
 ON CONFLICT (permission_id) DO UPDATE
-SET permission_name = EXCLUDED.permission_name,
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipment_types (
+  equipment_type_id, equipment_type_name, created_at, updated_at, deleted_at
+) VALUES (
+  9400001, 'copy user admin equipment type', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+)
+ON CONFLICT (equipment_type_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipment_masters (
+  equipment_master_id, equipment_type_id, equipment_name,
+  equipment_info_json, equipment_info_html,
+  created_at, updated_at, deleted_at
+) VALUES (
+  9400001, 9400001, 'copy user admin equipment',
+  '{"type":"copy-user-admin"}', '<p>copy user admin</p>',
+  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL
+)
+ON CONFLICT (equipment_master_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO annotation_type_master (
+  annotation_type, annotation_type_name, created_at, updated_at, deleted_at
+) VALUES
+  ('10', '緊急', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  ('20', '通常', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (annotation_type) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO facilities_tree (
+  facility_id, parent_id, facility_name, sort_order, tree_level, is_leaf,
+  public_flag, outer_flag, facility_description, authority_setting_flg,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9400000, NULL, 'copy_user_root', 9400000, 1, FALSE, '01', FALSE, 'copy root', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+
+  (9400100, 9400000, 'copy_user_full_source', 10000000, 2, FALSE, '01', FALSE, 'full source', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400110, 9400100, 'copy_user_full_child_1', 10000000, 3, FALSE, '01', FALSE, 'full child 1', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400111, 9400110, 'copy_user_full_grandchild_1', 10000000, 4, TRUE, '01', FALSE, 'full grandchild 1', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400120, 9400100, 'copy_user_full_child_2', 20000000, 3, TRUE, '02', TRUE, 'full child 2', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+
+  (9400200, 9400000, 'copy_user_full_destination_parent', 20000000, 2, FALSE, '01', FALSE, 'destination parent', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400210, 9400200, 'copy_user_existing_child_for_first', 10000000, 3, TRUE, '01', FALSE, 'existing child for first copy', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+
+  (9400500, 9400000, 'copy_user_between_source_empty', 30000000, 2, TRUE, '01', FALSE, 'between source no related data', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400600, 9400000, 'copy_user_between_parent', 40000000, 2, FALSE, '01', FALSE, 'between parent', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400610, 9400600, 'copy_user_between_target_first', 10000000, 3, TRUE, '01', FALSE, 'between target first', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400620, 9400600, 'copy_user_between_target_second', 20000000, 3, TRUE, '01', FALSE, 'between target second', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+
+  (9400700, 9400000, 'copy_user_last_source_empty', 50000000, 2, TRUE, '01', FALSE, 'last source no related data', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400800, 9400000, 'copy_user_last_parent', 60000000, 2, FALSE, '01', FALSE, 'last parent', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400810, 9400800, 'copy_user_last_first_child', 10000000, 3, TRUE, '01', FALSE, 'last first child', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9400820, 9400800, 'copy_user_last_target_child', 20000000, 3, TRUE, '01', FALSE, 'last target child', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+
+  (9400900, 9400000, 'copy_user_no_permission_source', 70000000, 2, TRUE, '01', FALSE, 'no permission source for R_USER01', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (facility_id) DO UPDATE
+SET parent_id = EXCLUDED.parent_id,
+    facility_name = EXCLUDED.facility_name,
+    sort_order = EXCLUDED.sort_order,
+    tree_level = EXCLUDED.tree_level,
+    is_leaf = EXCLUDED.is_leaf,
+    public_flag = EXCLUDED.public_flag,
+    outer_flag = EXCLUDED.outer_flag,
+    facility_description = EXCLUDED.facility_description,
+    authority_setting_flg = EXCLUDED.authority_setting_flg,
     updated_at = CURRENT_TIMESTAMP,
     deleted_at = NULL;
 
+INSERT INTO files (
+  file_id, file_name, file_path, file_type, file_size, s3_bucket, created_at, deleted_at
+) VALUES
+  (9401001, 'copy-user-full-vr.jpg', '/9401001', 'vr_image', 1001, 'copy-user-test', CURRENT_TIMESTAMP, NULL),
+  (9401002, 'copy-user-full-map.png', '/9401002', 'map_image', 1002, 'copy-user-test', CURRENT_TIMESTAMP, NULL),
+  (9401011, 'copy-user-child-vr.jpg', '/9401011', 'vr_image', 1011, 'copy-user-test', CURRENT_TIMESTAMP, NULL),
+  (9401012, 'copy-user-child-map.png', '/9401012', 'map_image', 1012, 'copy-user-test', CURRENT_TIMESTAMP, NULL),
+  (9401021, 'copy-user-grandchild-vr.jpg', '/9401021', 'vr_image', 1021, 'copy-user-test', CURRENT_TIMESTAMP, NULL),
+  (9401022, 'copy-user-grandchild-map.png', '/9401022', 'map_image', 1022, 'copy-user-test', CURRENT_TIMESTAMP, NULL),
+  (9401031, 'copy-user-child2-vr.jpg', '/9401031', 'vr_image', 1031, 'copy-user-test', CURRENT_TIMESTAMP, NULL),
+  (9401032, 'copy-user-child2-map.png', '/9401032', 'map_image', 1032, 'copy-user-test', CURRENT_TIMESTAMP, NULL),
+  (9401200, 'copy-user-destination-parent-map.png', '/9401200', 'map_image', 1200, 'copy-user-test', CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (file_id) DO UPDATE
+SET deleted_at = NULL;
 
-Step 3: Find facilities that already have USER_ADMIN edit permission.
+INSERT INTO facility_images (
+  image_id, facility_id, file_id, image_name, shooting_height, ceiling_height,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9402001, 9400100, 9401001, 'copy-user-full-vr.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9402011, 9400110, 9401011, 'copy-user-child-vr.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9402021, 9400111, 9401021, 'copy-user-grandchild-vr.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9402031, 9400120, 9401031, 'copy-user-child2-vr.jpg', 1600, 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (image_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-Replace:
-<USER_ADMIN_ROLE> with the token role, for example R_USER01.
+INSERT INTO maps (
+  map_id, facility_id, file_id, map_name, image_width, image_height,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9403001, 9400100, 9401002, 'copy-user-full-map.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9403011, 9400110, 9401012, 'copy-user-child-map.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9403021, 9400111, 9401022, 'copy-user-grandchild-map.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9403031, 9400120, 9401032, 'copy-user-child2-map.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9403200, 9400200, 9401200, 'copy-user-destination-parent-map.png', 736, 736, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (map_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
-Current backend note:
-For permission checks, the current Java code compares the token role with
-facility_role_permission.keycloak_role_id.
-Therefore, a row with only keycloak_role_name is not enough for USER_ADMIN copy success.
-
-SQL:
-
-SELECT
-  ft.facility_id,
-  ft.parent_id,
-  ft.facility_name,
-  frp.permission_id,
-  frp.keycloak_role_id,
-  frp.keycloak_role_name
-FROM facilities_tree ft
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
- AND frp.permission_id = 10
- AND frp.keycloak_role_id IN ('<USER_ADMIN_ROLE>')
- AND frp.deleted_at IS NULL
-WHERE ft.deleted_at IS NULL
-ORDER BY ft.facility_id;
-
-If this returns rows:
-Use one returned facility_id as <request_facility_id>.
-
-If this returns 0 rows:
-Run Step 4 to create permission data.
-
-
-Step 4: Create USER_ADMIN edit permission for prepared copy source IDs.
-
-Use this if you are testing the prepared data from the SYS_ADMIN copy doc.
-Replace R_USER01 with your real <USER_ADMIN_ROLE> if different.
-
-SQL:
-
-INSERT INTO facility_role_permission (
-  permission_id,
-  facility_id,
-  keycloak_role_id,
-  keycloak_role_name,
-  created_at,
-  updated_at,
-  deleted_at
-)
-SELECT
-  10,
-  source.facility_id,
-  'R_USER01',
-  'R_USER01',
-  CURRENT_TIMESTAMP,
-  CURRENT_TIMESTAMP,
-  NULL
-FROM (
-  VALUES
-    (1100),
-    (9100500),
-    (9200500)
-) AS source(facility_id)
-WHERE EXISTS (
-  SELECT 1
-  FROM facilities_tree ft
-  WHERE ft.facility_id = source.facility_id
-    AND ft.deleted_at IS NULL
-)
-AND NOT EXISTS (
-  SELECT 1
-  FROM facility_role_permission frp
-  WHERE frp.permission_id = 10
-    AND frp.facility_id = source.facility_id
-    AND frp.keycloak_role_id = 'R_USER01'
-    AND frp.deleted_at IS NULL
-);
-
-
-Step 5: Create USER_ADMIN edit permission for any specific facility.
-
-Use this when you selected a different <request_facility_id>.
-Replace both placeholders.
-
-SQL:
+INSERT INTO map_points (
+  map_point_id, map_id, facility_id, x, y, target_id,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9404001, 9403001, 9400100, 10, 10, 9400110, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9404011, 9403011, 9400110, 20, 20, 9400111, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9404021, 9403021, 9400111, 30, 30, 9400100, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9404031, 9403031, 9400120, 40, 40, 9400100, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (map_point_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
 
 INSERT INTO facility_role_permission (
-  permission_id,
-  facility_id,
-  keycloak_role_id,
-  keycloak_role_name,
-  created_at,
-  updated_at,
-  deleted_at
+  facility_role_permission_id, permission_id, facility_id, keycloak_role_id, keycloak_role_name,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9405001, 20, 9400100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9405002, 30, 9400100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9405003, 50, 9400100, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9405011, 20, 9400110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9405012, 30, 9400110, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9405021, 20, 9400111, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9405031, 20, 9400120, 'R_USER01', 'R_USER01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (facility_role_permission_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO equipments (
+  equipment_id, facility_id, equipment_master_id, yaw, pitch,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9406001, 9400100, 9400001, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9406011, 9400110, 9400001, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9406021, 9400111, 9400001, 3, 3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9406031, 9400120, 9400001, 4, 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (equipment_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO annotations (
+  annotation_id, facility_id, annotation_type, annotation_title, annotation_content,
+  created_by, display_expire_type, display_expire_at, yaw, pitch,
+  created_at, updated_at, deleted_at
+) VALUES
+  (9407001, 9400100, '10', 'copy source emergency', 'must not be copied', 'copy-test', FALSE, NULL, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
+  (9407011, 9400110, '20', 'copy child normal', 'must not be copied', 'copy-test', FALSE, NULL, 2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+ON CONFLICT (annotation_id) DO UPDATE
+SET deleted_at = NULL,
+    updated_at = CURRENT_TIMESTAMP;
+
+UPDATE facility_role_permission
+SET deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE facility_id = 9400900
+  AND permission_id = 10
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+SELECT setval(pg_get_serial_sequence('facilities_tree', 'facility_id'), COALESCE((SELECT MAX(facility_id) FROM facilities_tree), 1), true);
+SELECT setval(pg_get_serial_sequence('files', 'file_id'), COALESCE((SELECT MAX(file_id) FROM files), 1), true);
+SELECT setval(pg_get_serial_sequence('facility_images', 'image_id'), COALESCE((SELECT MAX(image_id) FROM facility_images), 1), true);
+SELECT setval(pg_get_serial_sequence('maps', 'map_id'), COALESCE((SELECT MAX(map_id) FROM maps), 1), true);
+SELECT setval(pg_get_serial_sequence('map_points', 'map_point_id'), COALESCE((SELECT MAX(map_point_id) FROM map_points), 1), true);
+SELECT setval(pg_get_serial_sequence('facility_role_permission', 'facility_role_permission_id'), COALESCE((SELECT MAX(facility_role_permission_id) FROM facility_role_permission), 1), true);
+SELECT setval(pg_get_serial_sequence('equipments', 'equipment_id'), COALESCE((SELECT MAX(equipment_id) FROM equipments), 1), true);
+SELECT setval(pg_get_serial_sequence('annotations', 'annotation_id'), COALESCE((SELECT MAX(annotation_id) FROM annotations), 1), true);
+
+COMMIT;
+
+
+0-A. Check Prepared DB Data
+---------------------------
+
+SQL:
+
+SELECT facility_id, parent_id, facility_name, sort_order, tree_level, is_leaf, deleted_at
+FROM facilities_tree
+WHERE facility_id IN (
+  9400000, 9400100, 9400110, 9400111, 9400120,
+  9400200, 9400210,
+  9400500, 9400600, 9400610, 9400620,
+  9400700, 9400800, 9400810, 9400820,
+  9400900
 )
+ORDER BY facility_id;
+
+Expected:
+All rows exist and deleted_at is NULL.
+
+SQL for FULL source related data:
+
 SELECT
-  10,
-  <request_facility_id>,
-  '<USER_ADMIN_ROLE>',
-  '<USER_ADMIN_ROLE>',
-  CURRENT_TIMESTAMP,
-  CURRENT_TIMESTAMP,
-  NULL
-WHERE EXISTS (
-  SELECT 1
+  (SELECT COUNT(*) FROM facility_images WHERE facility_id IN (9400100, 9400110, 9400111, 9400120) AND deleted_at IS NULL) AS source_image_count,
+  (SELECT COUNT(*) FROM maps WHERE facility_id IN (9400100, 9400110, 9400111, 9400120) AND deleted_at IS NULL) AS source_map_count,
+  (SELECT COUNT(*) FROM map_points WHERE facility_id IN (9400100, 9400110, 9400111, 9400120) AND deleted_at IS NULL) AS source_map_point_count,
+  (SELECT COUNT(*) FROM facility_role_permission WHERE facility_id IN (9400100, 9400110, 9400111, 9400120) AND deleted_at IS NULL) AS source_role_count,
+  (SELECT COUNT(*) FROM equipments WHERE facility_id IN (9400100, 9400110, 9400111, 9400120) AND deleted_at IS NULL) AS source_equipment_count,
+  (SELECT COUNT(*) FROM annotations WHERE facility_id IN (9400100, 9400110, 9400111, 9400120) AND deleted_at IS NULL) AS source_annotation_count;
+
+Expected:
+All counts are greater than 0.
+
+
+1-1 Authentication And Invalid Request Cases
+-------------------------------------------
+
+Use endpoint format:
+POST http://localhost:8081/facilities/<facilityId>/copy
+
+1-1-1 Token無し:
+Do not send Authorization header.
+Expected: invalid_token.
+
+1-1-2 不正なトークン:
+Send an invalid bearer token.
+Expected: invalid_token.
+
+1-1-3 正しいリクエストトークン:
+Use USER_ADMIN access token.
+Expected: normal response for valid request.
+
+1-1-4 正しいリフレッシュトークン:
+If your auth layer accepts refresh token for this API, send refresh token.
+Expected by Excel: normal response.
+
+1-1-5 facilityid=存在しないファシリティID:
+
+POST http://localhost:8081/facilities/999999999/copy
+
+Body:
+{
+  "parent_id": 9400200,
+  "target_facility_id": null
+}
+
+Expected by Excel:
+Normal response with data = null or 0 result.
+
+1-1-6 facilityid not numeric:
+
+POST http://localhost:8081/facilities/abc/copy
+
+Expected:
+invalid_request.
+
+1-1-7 facilityid more than 19 bytes:
+
+POST http://localhost:8081/facilities/12345678901234567890/copy
+
+Expected:
+invalid_request.
+
+1-1-8 parent_id does not exist:
+
+POST http://localhost:8081/facilities/9400100/copy
+
+Body:
+{
+  "parent_id": 999999999,
+  "target_facility_id": null
+}
+
+Expected:
+invalid_request or not_found error.
+
+1-1-9 parent_id not numeric:
+
+Body:
+{
+  "parent_id": "abc",
+  "target_facility_id": null
+}
+
+Expected:
+invalid_request.
+
+1-1-10 parent_id more than 19 bytes:
+
+Body:
+{
+  "parent_id": "12345678901234567890",
+  "target_facility_id": null
+}
+
+Expected:
+invalid_request.
+
+1-1-11 target_facility_id does not exist:
+
+Body:
+{
+  "parent_id": 9400200,
+  "target_facility_id": 999999999
+}
+
+Expected:
+invalid_request.
+
+1-1-12 target_facility_id not numeric:
+
+Body:
+{
+  "parent_id": 9400200,
+  "target_facility_id": "abc"
+}
+
+Expected:
+invalid_request.
+
+1-1-13 target_facility_id more than 19 bytes:
+
+Body:
+{
+  "parent_id": 9400200,
+  "target_facility_id": "12345678901234567890"
+}
+
+Expected:
+invalid_request.
+
+1-1-14 parent_id and target_facility_id combination does not exist:
+
+Confirm SQL returns 0:
+
+SELECT COUNT(*) AS tree_combination_count
+FROM facilities_tree
+WHERE facility_id = 9400610
+  AND parent_id = 9400200
+  AND deleted_at IS NULL;
+
+Postman body:
+{
+  "parent_id": 9400200,
+  "target_facility_id": 9400610
+}
+
+Expected:
+invalid_request.
+
+1-1-15 facility_id does not have permission_id = 10:
+
+Current code note:
+With a real USER_ADMIN token, this now succeeds because USER_ADMIN is admin.
+To test Excel permission error, use a non-admin token such as R_USER01.
+
+Confirm no edit permission:
+
+SELECT COUNT(*) AS edit_permission_count
+FROM facility_role_permission
+WHERE permission_id = 10
+  AND facility_id = 9400900
+  AND keycloak_role_id IN ('R_USER01')
+  AND deleted_at IS NULL;
+
+Expected:
+edit_permission_count = 0.
+
+Postman for Excel permission error:
+
+POST http://localhost:8081/facilities/9400900/copy
+
+Headers:
+Authorization: Bearer <R_USER01_ACCESS_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "parent_id": 9400200,
+  "target_facility_id": null
+}
+
+Expected:
+permission_denied.
+
+Postman with USER_ADMIN token:
+Expected by current code: success, because USER_ADMIN bypasses this DB permission check.
+
+
+1-2 / 1-3 / 1-4 First Position FULL Copy
+---------------------------------------
+
+Request:
+
+POST http://localhost:8081/facilities/9400100/copy
+
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "parent_id": 9400200,
+  "target_facility_id": null
+}
+
+Expected response:
+success = true.
+data.facility_id is a new copied facility_id, different from 9400100.
+
+Save:
+<copied_full_facility_id> = response data.facility_id
+
+DB check 1-4-1 to 1-4-13:
+
+SELECT
+  copied.facility_id AS copied_facility_id,
+  copied.parent_id AS copied_parent_id,
+  copied.facility_name AS copied_facility_name,
+  copied.facility_description AS copied_description,
+  copied.tree_level AS copied_tree_level,
+  copied.is_leaf AS copied_is_leaf,
+  copied.public_flag AS copied_public_flag,
+  copied.outer_flag AS copied_outer_flag,
+  copied.authority_setting_flg AS copied_authority_setting_flag,
+  copied.sort_order AS copied_sort_order,
+  copied.created_at AS copied_created_at,
+  copied.updated_at AS copied_updated_at,
+  copied.deleted_at AS copied_deleted_at,
+
+  src.facility_id AS source_facility_id,
+  src.parent_id AS source_parent_id,
+  src.facility_name AS source_facility_name,
+  src.facility_description AS source_description,
+  src.tree_level AS source_tree_level,
+  src.is_leaf AS source_is_leaf,
+  src.public_flag AS source_public_flag,
+  src.outer_flag AS source_outer_flag,
+  src.authority_setting_flg AS source_authority_setting_flag,
+
+  first_child.sort_order AS existing_first_sort_order,
+  ((first_child.sort_order + 0) / 2) AS expected_sort_order
+FROM facilities_tree copied
+JOIN facilities_tree src
+  ON src.facility_id = 9400100
+LEFT JOIN facilities_tree first_child
+  ON first_child.parent_id = 9400200
+ AND first_child.facility_id = 9400210
+WHERE copied.facility_id = <copied_full_facility_id>;
+
+Expected:
+copied_parent_id = 9400200.
+copied_sort_order = expected_sort_order.
+Copied fields match source fields except facility_id, parent_id, created_at, updated_at, deleted_at.
+copied_deleted_at is NULL.
+
+DB check 1-4-20 to 1-4-38 vr_image and FILES:
+
+SELECT
+  src_fi.image_id AS source_image_id,
+  copied_fi.image_id AS copied_image_id,
+  src_fi.file_id AS source_file_id,
+  copied_fi.file_id AS copied_file_id,
+  src_file.file_name AS source_file_name,
+  copied_file.file_name AS copied_file_name,
+  src_file.file_path AS source_file_path,
+  copied_file.file_path AS copied_file_path,
+  src_file.file_type AS source_file_type,
+  copied_file.file_type AS copied_file_type,
+  src_file.file_size AS source_file_size,
+  copied_file.file_size AS copied_file_size,
+  src_file.s3_bucket AS source_s3_bucket,
+  copied_file.s3_bucket AS copied_s3_bucket,
+  src_fi.image_name AS source_image_name,
+  copied_fi.image_name AS copied_image_name,
+  src_fi.shooting_height AS source_shooting_height,
+  copied_fi.shooting_height AS copied_shooting_height,
+  src_fi.ceiling_height AS source_ceiling_height,
+  copied_fi.ceiling_height AS copied_ceiling_height,
+  copied_fi.created_at AS copied_image_created_at,
+  copied_fi.updated_at AS copied_image_updated_at,
+  copied_fi.deleted_at AS copied_image_deleted_at,
+  copied_file.created_at AS copied_file_created_at,
+  copied_file.deleted_at AS copied_file_deleted_at
+FROM facility_images src_fi
+JOIN facility_images copied_fi
+  ON copied_fi.facility_id = <copied_full_facility_id>
+JOIN files src_file
+  ON src_file.file_id = src_fi.file_id
+JOIN files copied_file
+  ON copied_file.file_id = copied_fi.file_id
+WHERE src_fi.facility_id = 9400100
+  AND src_fi.deleted_at IS NULL
+  AND copied_fi.deleted_at IS NULL;
+
+Expected:
+Exactly 1 row.
+copied_image_id and copied_file_id are new IDs.
+File values match source file values.
+FILES table has no updated_at column in DB設計.md, so do not check files.updated_at.
+
+DB check 1-4-40 to 1-4-59 map and FILES:
+
+SELECT
+  src_m.map_id AS source_map_id,
+  copied_m.map_id AS copied_map_id,
+  src_m.file_id AS source_file_id,
+  copied_m.file_id AS copied_file_id,
+  src_file.file_name AS source_file_name,
+  copied_file.file_name AS copied_file_name,
+  src_file.file_path AS source_file_path,
+  copied_file.file_path AS copied_file_path,
+  src_file.file_type AS source_file_type,
+  copied_file.file_type AS copied_file_type,
+  src_file.file_size AS source_file_size,
+  copied_file.file_size AS copied_file_size,
+  src_file.s3_bucket AS source_s3_bucket,
+  copied_file.s3_bucket AS copied_s3_bucket,
+  src_m.map_name AS source_map_name,
+  copied_m.map_name AS copied_map_name,
+  src_m.image_width AS source_image_width,
+  copied_m.image_width AS copied_image_width,
+  src_m.image_height AS source_image_height,
+  copied_m.image_height AS copied_image_height,
+  copied_m.created_at AS copied_map_created_at,
+  copied_m.updated_at AS copied_map_updated_at,
+  copied_m.deleted_at AS copied_map_deleted_at,
+  copied_file.created_at AS copied_file_created_at,
+  copied_file.deleted_at AS copied_file_deleted_at
+FROM maps src_m
+JOIN maps copied_m
+  ON copied_m.facility_id = <copied_full_facility_id>
+JOIN files src_file
+  ON src_file.file_id = src_m.file_id
+JOIN files copied_file
+  ON copied_file.file_id = copied_m.file_id
+WHERE src_m.facility_id = 9400100
+  AND src_m.deleted_at IS NULL
+  AND copied_m.deleted_at IS NULL;
+
+Expected:
+Exactly 1 row.
+copied_map_id and copied_file_id are new IDs.
+Map and file values match source.
+
+DB check 1-4-61 to 1-4-69 map_point:
+
+SELECT
+  mp.map_point_id,
+  mp.map_id,
+  mp.facility_id,
+  mp.x,
+  mp.y,
+  mp.created_at,
+  mp.updated_at,
+  mp.deleted_at,
+  parent_map.map_id AS expected_parent_map_id
+FROM map_points mp
+LEFT JOIN maps parent_map
+  ON parent_map.facility_id = 9400200
+ AND parent_map.deleted_at IS NULL
+WHERE mp.facility_id = <copied_full_facility_id>
+  AND mp.deleted_at IS NULL;
+
+Expected:
+At least 1 copied map_point row when the source has map_points.
+facility_id = copied facility ID.
+
+DB check 1-4-70 to 1-4-78 roles:
+
+SELECT
+  src.permission_id AS source_permission_id,
+  copied.permission_id AS copied_permission_id,
+  src.keycloak_role_id AS source_keycloak_role_id,
+  copied.keycloak_role_id AS copied_keycloak_role_id,
+  copied.facility_id AS copied_facility_id,
+  copied.created_at,
+  copied.updated_at,
+  copied.deleted_at
+FROM facility_role_permission src
+JOIN facility_role_permission copied
+  ON copied.facility_id = <copied_full_facility_id>
+ AND copied.permission_id = src.permission_id
+ AND copied.keycloak_role_id = src.keycloak_role_id
+WHERE src.facility_id = 9400100
+  AND src.deleted_at IS NULL
+  AND copied.deleted_at IS NULL
+ORDER BY src.permission_id;
+
+Expected:
+Copied role rows exist and values match source.
+
+DB check 1-4-79 to 1-4-88 equipments:
+
+SELECT
+  src.equipment_id AS source_equipment_id,
+  copied.equipment_id AS copied_equipment_id,
+  src.equipment_master_id AS source_equipment_master_id,
+  copied.equipment_master_id AS copied_equipment_master_id,
+  src.yaw AS source_yaw,
+  copied.yaw AS copied_yaw,
+  src.pitch AS source_pitch,
+  copied.pitch AS copied_pitch,
+  copied.created_at,
+  copied.updated_at,
+  copied.deleted_at
+FROM equipments src
+JOIN equipments copied
+  ON copied.facility_id = <copied_full_facility_id>
+WHERE src.facility_id = 9400100
+  AND src.deleted_at IS NULL
+  AND copied.deleted_at IS NULL;
+
+Expected:
+Copied equipment rows exist and values match source.
+
+DB check 1-4-89 annotations:
+
+SELECT COUNT(*) AS copied_annotation_count
+FROM annotations
+WHERE facility_id = <copied_full_facility_id>
+  AND deleted_at IS NULL;
+
+Expected:
+copied_annotation_count = 0.
+
+DB check 1-4-90 to 1-4-97 child and descendant copy:
+
+WITH copied_children AS (
+  SELECT facility_id, parent_id, facility_name
   FROM facilities_tree
-  WHERE facility_id = <request_facility_id>
+  WHERE parent_id = <copied_full_facility_id>
     AND deleted_at IS NULL
+),
+copied_descendants AS (
+  WITH RECURSIVE d AS (
+    SELECT facility_id, parent_id, facility_name
+    FROM facilities_tree
+    WHERE parent_id = <copied_full_facility_id>
+      AND deleted_at IS NULL
+    UNION ALL
+    SELECT child.facility_id, child.parent_id, child.facility_name
+    FROM facilities_tree child
+    JOIN d parent
+      ON child.parent_id = parent.facility_id
+    WHERE child.deleted_at IS NULL
+  )
+  SELECT * FROM d
 )
-AND NOT EXISTS (
-  SELECT 1
-  FROM facility_role_permission
-  WHERE permission_id = 10
-    AND facility_id = <request_facility_id>
-    AND keycloak_role_id = '<USER_ADMIN_ROLE>'
-    AND deleted_at IS NULL
-);
-
-
-Step 6: Fetch the request facility_id having permission.
-
-Replace:
-<USER_ADMIN_ROLE> with your token role.
-
-SQL:
-
 SELECT
-  ft.facility_id AS request_facility_id,
-  ft.parent_id AS source_current_parent_id,
-  ft.facility_name,
-  frp.permission_id,
-  COALESCE(frp.keycloak_role_id, frp.keycloak_role_name) AS matched_role
-FROM facilities_tree ft
-JOIN facility_role_permission frp
-  ON frp.facility_id = ft.facility_id
- AND frp.permission_id = 10
- AND frp.keycloak_role_id IN ('<USER_ADMIN_ROLE>')
- AND frp.deleted_at IS NULL
-WHERE ft.deleted_at IS NULL
-ORDER BY ft.facility_id;
-
-Use:
-request_facility_id as the path ID in:
-
-POST http://localhost:8081/facilities/<request_facility_id>/copy
-
-
-Step 7: Fetch destination parent_id and target_facility_id for a success copy.
-
-For first-position copy:
-
-SELECT facility_id AS parent_id, facility_name
-FROM facilities_tree
-WHERE deleted_at IS NULL
-  AND facility_id <> <request_facility_id>
-ORDER BY facility_id
-LIMIT 1;
-
-Use body:
-
-{
-  "parent_id": <parent_id>,
-  "target_facility_id": null
-}
-
-For between-copy using prepared data:
-
-Use:
-request_facility_id = 9100500
-parent_id = 9100200
-target_facility_id = 9100300
-
-For last-position copy using prepared data:
-
-Use:
-request_facility_id = 9200500
-parent_id = 9200200
-target_facility_id = 9200400
-
-
-Step 8: Final permission confirmation before Postman.
-
-Replace values with your actual request facility and role.
-
-SQL:
-
-SELECT COUNT(*) AS edit_permission_count
-FROM facility_role_permission
-WHERE permission_id = 10
-  AND facility_id = <request_facility_id>
-  AND keycloak_role_id IN ('<USER_ADMIN_ROLE>')
-  AND deleted_at IS NULL;
+  (SELECT COUNT(*) FROM copied_children) AS copied_child_count,
+  (SELECT COUNT(*) FROM copied_descendants) AS copied_descendant_count,
+  (SELECT COUNT(*) FROM facility_images WHERE facility_id IN (SELECT facility_id FROM copied_descendants) AND deleted_at IS NULL) AS copied_descendant_image_count,
+  (SELECT COUNT(*) FROM maps WHERE facility_id IN (SELECT facility_id FROM copied_descendants) AND deleted_at IS NULL) AS copied_descendant_map_count,
+  (SELECT COUNT(*) FROM facility_role_permission WHERE facility_id IN (SELECT facility_id FROM copied_descendants) AND deleted_at IS NULL) AS copied_descendant_role_count,
+  (SELECT COUNT(*) FROM equipments WHERE facility_id IN (SELECT facility_id FROM copied_descendants) AND deleted_at IS NULL) AS copied_descendant_equipment_count,
+  (SELECT COUNT(*) FROM annotations WHERE facility_id IN (SELECT facility_id FROM copied_descendants) AND deleted_at IS NULL) AS copied_descendant_annotation_count;
 
 Expected:
-edit_permission_count >= 1
+copied_child_count > 0.
+copied_descendant_count > 0.
+Related data is copied for children/descendants.
+copied_descendant_annotation_count = 0.
 
 
-Before Testing: Find USER_ADMIN Roles
+1-5 / 1-6 / 1-7 / 1-8 Between Copy With No Related Data
+------------------------------------------------------
 
-Use the USER_ADMIN access token in jwt.io or your token decoder.
+Request:
 
-Find the user roles in the JWT claims, usually under:
+POST http://localhost:8081/facilities/9400500/copy
 
-resource_access
-realm_access
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
 
-Use the roles that your backend receives after removing the ROLE_ prefix.
+Body:
+{
+  "parent_id": 9400600,
+  "target_facility_id": 9400610
+}
 
-Important:
-The Excel says keycloak_role_id, but the current backend compares facility_role_permission.keycloak_role_id
-with the role names extracted from the JWT.
+Before Postman SQL:
 
-Example:
-If JWT role is:
-ROLE_USER_ADMIN
-
-The backend role name becomes:
-USER_ADMIN
-
-So your DB test value may need to be:
-USER_ADMIN
-
-
-Before Testing: Find A Valid Source Facility
-
-Find an active facility to copy:
-
-SELECT facility_id, parent_id, facility_name
+SELECT facility_id, parent_id, sort_order
 FROM facilities_tree
-WHERE deleted_at IS NULL
+WHERE parent_id = 9400600
+  AND deleted_at IS NULL
 ORDER BY facility_id;
 
-Use one facility_id as:
-<request_facility_id>
+Expected before:
+9400610 sort_order = 10000000.
+9400620 sort_order = 20000000.
+
+Expected response:
+success = true.
+Save <copied_between_facility_id> = response data.facility_id.
+
+DB check:
+
+SELECT
+  copied.facility_id,
+  copied.parent_id,
+  copied.sort_order,
+  copied.updated_at,
+  ((target.sort_order + next_child.sort_order) / 2) AS expected_sort_order,
+  (SELECT COUNT(*) FROM facility_images WHERE facility_id = copied.facility_id AND deleted_at IS NULL) AS copied_image_count,
+  (SELECT COUNT(*) FROM maps WHERE facility_id = copied.facility_id AND deleted_at IS NULL) AS copied_map_count,
+  (SELECT COUNT(*) FROM map_points WHERE facility_id = copied.facility_id AND deleted_at IS NULL) AS copied_map_point_count,
+  (SELECT COUNT(*) FROM facility_role_permission WHERE facility_id = copied.facility_id AND deleted_at IS NULL) AS copied_role_count,
+  (SELECT COUNT(*) FROM equipments WHERE facility_id = copied.facility_id AND deleted_at IS NULL) AS copied_equipment_count,
+  (SELECT COUNT(*) FROM annotations WHERE facility_id = copied.facility_id AND deleted_at IS NULL) AS copied_annotation_count
+FROM facilities_tree copied
+JOIN facilities_tree target
+  ON target.facility_id = 9400610
+JOIN facilities_tree next_child
+  ON next_child.facility_id = 9400620
+WHERE copied.facility_id = <copied_between_facility_id>;
+
+Expected:
+parent_id = 9400600.
+sort_order = expected_sort_order = 15000000.
+All related copied_* counts = 0.
 
 
-Before Testing: Find A Valid Destination Parent
+1-9 / 1-10 / 1-11 Last Position Copy
+-----------------------------------
 
-Find another active facility to use as parent_id:
+Request:
 
-SELECT facility_id, parent_id, facility_name
+POST http://localhost:8081/facilities/9400700/copy
+
+Headers:
+Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
+Content-Type: application/json
+
+Body:
+{
+  "parent_id": 9400800,
+  "target_facility_id": 9400820
+}
+
+Before Postman SQL:
+
+SELECT facility_id, parent_id, sort_order
 FROM facilities_tree
-WHERE deleted_at IS NULL
-  AND facility_id <> <request_facility_id>
-ORDER BY facility_id;
+WHERE parent_id = 9400800
+  AND deleted_at IS NULL
+ORDER BY facility_id DESC;
 
-Use one facility_id as:
-<valid_parent_id>
+Expected before:
+First row by facility_id DESC is 9400820.
 
+Expected response:
+success = true.
+Save <copied_last_facility_id> = response data.facility_id.
 
-Case 1-1-15: USER_ADMIN does not have facility edit permission
+DB check:
 
-Purpose:
-Confirm USER_ADMIN cannot copy a facility unless the user has permission_id = 10 for that request facility_id.
-
-Step 1: Confirm permission does not exist
-
-Replace <USER_ADMIN_ROLE> with the role name from the token.
-
-SQL:
-
-SELECT COUNT(*) AS edit_permission_count
-FROM facility_role_permission
-WHERE permission_id = 10
-  AND facility_id = <request_facility_id>
-  AND keycloak_role_id IN ('<USER_ADMIN_ROLE>')
-  AND deleted_at IS NULL;
-
-Expected before error test:
-edit_permission_count = 0
-
-
-Step 2: Send Postman request
-
-Exact endpoint to write in Postman:
-http://localhost:8081/facilities/<request_facility_id>/copy
-
-Method:
-POST
-
-Headers:
-Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
-Content-Type: application/json
-
-Body:
-{
-  "parent_id": <valid_parent_id>,
-  "target_facility_id": null
-}
-
-
-Step 3: Expected response by Excel
-
-Expected:
-Error response.
-
-Expected response idea:
-{
-  "success": false,
-  "error_code": "permission_denied",
-  "message": "施設を登録する権限がありません",
-  "errors": null,
-  "data": null
-}
-
-Note:
-The exact Japanese message depends on backend implementation.
-The important checks are:
-1. success = false
-2. error_code = permission_denied
-3. data = null
-
-
-Step 4: Current code result check
-
-With the current code after the USER_ADMIN permission fix, this request should return permission_denied.
-
-If it returns success, recheck these items:
-1. The backend was restarted after the latest code change.
-2. The bearer token is really USER_ADMIN, not SYS_ADMIN.
-3. The SQL permission count is really 0.
-4. facility_role_permission.keycloak_role_id matches the role value extracted by the backend.
-
-
-Step 5: Add permission and confirm success
-
-After confirming the error case, add permission data directly in DB.
-
-Example SQL:
-
-INSERT INTO facility_role_permission (
-    permission_id,
-    facility_id,
-    keycloak_role_id,
-    keycloak_role_name,
-    created_at,
-    updated_at
-)
-VALUES (
-    10,
-    <request_facility_id>,
-    '<USER_ADMIN_ROLE>',
-    '<USER_ADMIN_ROLE>',
-    CURRENT_TIMESTAMP,
-    CURRENT_TIMESTAMP
-);
-
-Then rerun the same Postman request:
-
-POST http://localhost:8081/facilities/<request_facility_id>/copy
-
-Body:
-{
-  "parent_id": <valid_parent_id>,
-  "target_facility_id": null
-}
-
-Expected after adding permission:
-{
-  "success": true,
-  "error_code": null,
-  "message": "ok",
-  "errors": null,
-  "data": {
-    "facility_id": <new_copied_facility_id>
-  }
-}
-
-
-Case 1-5 Note: Between Copy With No Related Data / No Children
-
-For the SYS_ADMIN version, use the inserted setup and checks in:
-
-docs/facilitiesコピー(SYS_ADMIN）.txt
-
-Section:
-Case 1-5: Request parameters - copy between facilities
-Concrete setup SQL for Case 1-5 / 1-6 / 1-7 / 1-8
-
-Important USER_ADMIN difference:
-Current backend requires permission_id = 10 on the request facility_id.
-Therefore, for USER_ADMIN, facility_id 9100500 needs a facility_role_permission row before copy can succeed.
-
-This means the USER_ADMIN DB cannot be perfectly "no related rows" if permission is stored in
-facility_role_permission and the API is expected to succeed. Treat the permission_id = 10 row as
-the USER_ADMIN authorization setup row, not as copied business data.
-
-Add USER_ADMIN permission for prepared source 9100500:
-
-INSERT INTO facility_role_permission (
-  permission_id,
-  facility_id,
-  keycloak_role_id,
-  keycloak_role_name,
-  created_at,
-  updated_at,
-  deleted_at
-)
 SELECT
-  10,
-  9100500,
-  'R_USER01',
-  'R_USER01',
-  CURRENT_TIMESTAMP,
-  CURRENT_TIMESTAMP,
-  NULL
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM facility_role_permission
-  WHERE permission_id = 10
-    AND facility_id = 9100500
-    AND keycloak_role_id = 'R_USER01'
-    AND deleted_at IS NULL
-);
-
-Permission check:
-
-SELECT COUNT(*)
-FROM facility_role_permission
-WHERE permission_id = 10
-  AND facility_id = 9100500
-  AND keycloak_role_id IN ('R_USER01')
-  AND deleted_at IS NULL;
+  copied.facility_id,
+  copied.parent_id,
+  copied.sort_order,
+  copied.updated_at,
+  (target.sort_order + 10000000) AS expected_sort_order
+FROM facilities_tree copied
+JOIN facilities_tree target
+  ON target.facility_id = 9400820
+WHERE copied.facility_id = <copied_last_facility_id>;
 
 Expected:
-count = 1
-
-Postman:
-
-POST http://localhost:8081/facilities/9100500/copy
-
-Headers:
-Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
-Content-Type: application/json
-
-Body:
-{
-  "parent_id": 9100200,
-  "target_facility_id": 9100300
-}
-
-DB 1-7 checks:
-Use the same SYS_ADMIN Case 1-7 SQL.
-
-DB 1-8 checks:
-Use the same SYS_ADMIN Case 1-8 SQL, but expect copied_role_count to equal 1 if the authorization
-permission row is copied by the current backend.
+parent_id = 9400800.
+sort_order = expected_sort_order = 30000000.
 
 
-Case 1-9 Note: Last Position Copy
+Quick Postman Checklist
+-----------------------
 
-For the SYS_ADMIN version, use the inserted setup and checks in:
-
-docs/facilitiesコピー(SYS_ADMIN）.txt
-
-Section:
-Case 1-9: Request parameters - copy to last position
-Concrete setup SQL for Case 1-9 / 1-10 / 1-11
-
-Important USER_ADMIN difference:
-Current backend requires permission_id = 10 on the request facility_id.
-Therefore, for USER_ADMIN, facility_id 9200500 needs a facility_role_permission row before copy can succeed.
-
-Add USER_ADMIN permission for prepared source 9200500:
-
-INSERT INTO facility_role_permission (
-  permission_id,
-  facility_id,
-  keycloak_role_id,
-  keycloak_role_name,
-  created_at,
-  updated_at,
-  deleted_at
-)
-SELECT
-  10,
-  9200500,
-  'R_USER01',
-  'R_USER01',
-  CURRENT_TIMESTAMP,
-  CURRENT_TIMESTAMP,
-  NULL
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM facility_role_permission
-  WHERE permission_id = 10
-    AND facility_id = 9200500
-    AND keycloak_role_id = 'R_USER01'
-    AND deleted_at IS NULL
-);
-
-Permission check:
-
-SELECT COUNT(*)
-FROM facility_role_permission
-WHERE permission_id = 10
-  AND facility_id = 9200500
-  AND keycloak_role_id IN ('R_USER01')
-  AND deleted_at IS NULL;
-
-Expected:
-count = 1
-
-Postman:
-
-POST http://localhost:8081/facilities/9200500/copy
-
-Headers:
-Authorization: Bearer <USER_ADMIN_ACCESS_TOKEN>
-Content-Type: application/json
-
-Body:
-{
-  "parent_id": 9200200,
-  "target_facility_id": 9200400
-}
-
-DB checks:
-Use the same SYS_ADMIN Case 1-10 and Case 1-11 SQL.
-
-
-Shared SYS_ADMIN Steps
-
-For all other copy checks, use the same steps from:
-
-docs/facilitiesコピー(SYS_ADMIN）.txt
-
-Shared cases include:
-1. invalid token / invalid request tests
-2. copy to first position
-3. copy between facilities
-4. copy to last position
-5. DB checks for parent_id, sort_order, timestamps
-6. vr_image checks
-7. map checks
-8. map_point checks
-9. roles checks
-10. equipments checks
-11. annotations not copied
-12. children and descendants copy checks
-
-Only difference:
-Use USER_ADMIN bearer token, and confirm permission_id = 10 behavior first.
-
-
-Quick Checklist
-
-1. Use USER_ADMIN bearer token.
-2. Use endpoint:
+1. Run section 0 SQL.
+2. Run section 0-A SQL and confirm rows/counts.
+3. Use USER_ADMIN bearer token.
+4. Use endpoint:
    http://localhost:8081/facilities/<facilityId>/copy
-3. First test the no-permission case.
-4. Confirm SQL count for permission_id = 10 is 0.
-5. Send copy request.
-6. Expected by Excel: permission error.
-7. If current backend returns success, restart the backend and recheck the token role and permission SQL.
-8. Add permission_id = 10 for the USER_ADMIN role.
-9. Send copy request again.
-10. Expected after adding permission: success.
+5. Test invalid request cases from 1-1.
+6. Test FULL copy:
+   POST http://localhost:8081/facilities/9400100/copy
+7. Save returned facility_id and run all 1-4 SQL checks.
+8. Test between copy:
+   POST http://localhost:8081/facilities/9400500/copy
+9. Test last copy:
+   POST http://localhost:8081/facilities/9400700/copy
+10. For Excel 1-1-15 permission_denied, use a non-admin R_USER01 token, not USER_ADMIN.

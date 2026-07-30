@@ -1,0 +1,373 @@
+MinIO Setup And file_url Check
+==============================
+
+Purpose:
+Use this guide when:
+- POST /files returns file_upload_failed
+- GET /files/{id} returns file_download_failed
+- GET /files/{id} succeeds but file_url contains localhost:9000
+- Other computers cannot open file_url
+
+
+1. Important Meaning Of localhost
+---------------------------------
+
+localhost means "this same computer".
+
+If your backend returns this:
+
+http://localhost:9000/vr-view-bucket/...
+
+It works only on the same computer where MinIO is running.
+Other computers cannot use it because localhost points to their own computer.
+
+For other computers, file_url must use the MinIO server IP or hostname, for example:
+
+http://172.21.33.114:9000/vr-view-bucket/...
+
+
+2. Two MinIO Endpoints In application.properties
+-----------------------------------------------
+
+Use two settings:
+
+minio.endpoint=http://localhost:9000
+minio.public-endpoint=http://172.21.33.114:9000
+minio.access-key=minioadmin
+minio.secret-key=minioadmin123
+minio.bucket=vr-view-bucket
+
+Meaning:
+
+minio.endpoint:
+Internal endpoint used by Spring Boot to upload files to MinIO.
+If Spring Boot and MinIO run on the same PC, localhost is OK.
+
+minio.public-endpoint:
+External endpoint used inside the returned signed file_url.
+This must be reachable from other computers.
+
+Do not use the MinIO console port here.
+Use port 9000, not 9001.
+
+Correct:
+http://172.21.33.114:9000
+
+Wrong:
+http://127.0.0.1:9001/browser/vr-view-bucket
+http://localhost:9001/browser/vr-view-bucket
+
+
+3. Start MinIO So Other Computers Can Access It
+-----------------------------------------------
+
+MinIO has two ports:
+
+9000 = API port. Use this for file_url and backend.
+9001 = console/browser UI port. Do not use this for file_url.
+
+Windows example:
+
+minio.exe server --address "0.0.0.0:9000" --console-address "0.0.0.0:9001" data
+
+macOS/Linux example:
+
+minio server --address ":9000" --console-address ":9001" data
+
+If MinIO is started with only 127.0.0.1 or localhost, other computers cannot connect.
+
+Bad example:
+
+minio server --address "127.0.0.1:9000" --console-address "127.0.0.1:9001" data
+
+
+4. Find Your Server IP
+----------------------
+
+On Windows:
+
+ipconfig
+
+Look for IPv4 Address.
+Example:
+
+172.21.33.114
+
+On macOS/Linux:
+
+ifconfig
+
+or:
+
+ip addr
+
+Use that IP in:
+
+minio.public-endpoint=http://<server-ip>:9000
+
+Example:
+
+minio.public-endpoint=http://172.21.33.114:9000
+
+
+5. Open Firewall Ports
+----------------------
+
+On the computer running Spring Boot and MinIO, allow:
+
+8081 = Spring Boot API
+9000 = MinIO API / signed file_url
+9001 = MinIO console, optional
+
+If Windows firewall blocks 9000, other computers cannot open file_url.
+
+
+6. Restart Spring Boot After Changing Properties
+------------------------------------------------
+
+After editing application.properties, restart Spring Boot.
+
+Saving application.properties is not enough.
+
+If you do not restart, GET /files/{id} may still return the old localhost URL.
+
+
+7. Check MinIO From Server PC
+-----------------------------
+
+On the same PC where MinIO runs, open:
+
+http://localhost:9000
+
+Expected:
+MinIO API responds.
+
+Also open:
+
+http://172.21.33.114:9000
+
+Expected:
+It must also respond.
+
+If localhost works but 172.21.33.114 does not work, MinIO is not listening externally or firewall is blocking it.
+
+
+8. Check MinIO From Another Computer
+------------------------------------
+
+From another computer on the same network/VPN, open:
+
+http://172.21.33.114:9000
+
+Expected:
+It reaches MinIO.
+
+If this does not work, GET /files/{id} file_url will not work on that computer.
+
+Possible causes:
+- wrong IP address
+- firewall blocks 9000
+- MinIO started on localhost only
+- computers are not on same network/VPN
+
+
+9. Postman Upload Test
+----------------------
+
+Request:
+
+POST http://localhost:8081/files
+
+If testing from another computer, use:
+
+POST http://172.21.33.114:8081/files
+
+Headers:
+
+Authorization: Bearer <ACCESS_TOKEN>
+
+Body:
+
+form-data
+file_type = annotation
+file = choose a real file
+
+Expected success:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "file_id": 83691,
+    "file_name": "example.pdf",
+    "file_path": "/83691",
+    "file_type": "annotation",
+    "file_size": 12345,
+    "s3_bucket": "http://172.21.33.114:9000/vr-view-bucket",
+    "created_at": "2026/07/30 10:40:18"
+  }
+}
+
+If POST /files returns file_upload_failed:
+
+Check:
+- minio.endpoint is correct
+- MinIO is running
+- bucket exists or backend can create it
+- access key and secret key are correct
+- Spring Boot can access minio.endpoint
+
+
+10. Postman Download URL Test
+-----------------------------
+
+Request:
+
+GET http://localhost:8081/files/<file_id>
+
+If testing from another computer, use:
+
+GET http://172.21.33.114:8081/files/<file_id>
+
+Headers:
+
+Authorization: Bearer <ACCESS_TOKEN>
+
+Expected success:
+
+{
+  "success": true,
+  "error_code": null,
+  "message": "ok",
+  "data": {
+    "file_id": 83691,
+    "file_url": "http://172.21.33.114:9000/vr-view-bucket/83691/example.pdf?...",
+    "file_name": "example.pdf",
+    "file_type": "annotation",
+    "file_size": 12345,
+    "created_at": "2026/07/30 10:40:18",
+    "expires_at": "2026/07/30 10:55:18"
+  }
+}
+
+Expected:
+file_url starts with minio.public-endpoint.
+
+If file_url starts with localhost:
+
+Check:
+- minio.public-endpoint in application.properties
+- Spring Boot was restarted
+- target/classes/application.properties has the new value after build/restart
+
+If GET /files/{id} returns file_download_failed:
+
+Check:
+- Spring Boot can access minio.public-endpoint
+- http://172.21.33.114:9000 opens on the server PC
+- firewall allows port 9000
+- MinIO is not bound to localhost only
+
+
+11. Browser Test For Returned file_url
+--------------------------------------
+
+Copy file_url from GET /files/{id}.
+
+Open it in browser on:
+- server PC
+- another computer
+
+Expected:
+The file opens or downloads.
+
+Important:
+Signed file_url expires after about 15 minutes.
+If it expires, call GET /files/{id} again to get a new URL.
+
+
+12. Common Problems And Fixes
+-----------------------------
+
+Problem:
+POST /files succeeds but GET /files/{id} returns localhost URL.
+
+Cause:
+minio.public-endpoint is localhost or backend was not restarted.
+
+Fix:
+Set:
+
+minio.public-endpoint=http://172.21.33.114:9000
+
+Then restart Spring Boot.
+
+
+Problem:
+POST /files succeeds but GET /files/{id} returns file_download_failed.
+
+Cause:
+Spring Boot can upload to localhost, but cannot generate signed URL using public endpoint.
+
+Fix:
+Confirm this opens on the Spring Boot machine:
+
+http://172.21.33.114:9000
+
+If not, fix MinIO binding/firewall/IP.
+
+
+Problem:
+Server PC can open file_url, but other computer cannot.
+
+Cause:
+Other computer cannot reach the MinIO server IP/port.
+
+Fix:
+Check:
+- same network/VPN
+- firewall port 9000
+- correct IP
+- MinIO started with 0.0.0.0 or :9000
+
+
+Problem:
+You opened this URL:
+
+http://127.0.0.1:9001/browser/vr-view-bucket
+
+Meaning:
+This is MinIO console UI on local PC.
+It does not prove other computers can access MinIO API.
+
+Correct test:
+
+http://172.21.33.114:9000
+
+
+13. Final Correct Example
+-------------------------
+
+application.properties:
+
+minio.endpoint=http://localhost:9000
+minio.public-endpoint=http://172.21.33.114:9000
+minio.access-key=minioadmin
+minio.secret-key=minioadmin123
+minio.bucket=vr-view-bucket
+
+Start MinIO:
+
+minio.exe server --address "0.0.0.0:9000" --console-address "0.0.0.0:9001" data
+
+Restart Spring Boot.
+
+Postman:
+
+POST http://localhost:8081/files
+GET  http://localhost:8081/files/<file_id>
+
+Expected returned file_url:
+
+http://172.21.33.114:9000/vr-view-bucket/<file_id>/<file_name>?...

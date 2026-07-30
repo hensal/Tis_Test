@@ -66,7 +66,7 @@ public class FacilitiesService {
             String keyword,
             Set<String> userRoles
     ) {
-        boolean filterByRole = userRoles == null || !userRoles.contains("SYS_ADMIN");
+        boolean filterByRole = !hasAdminRole(userRoles);
         if (filterByRole && (userRoles == null || userRoles.isEmpty())) {
             return List.of();
         }
@@ -113,7 +113,11 @@ public class FacilitiesService {
             Long facilityId,
             Set<String> userRoles
     ) {
-        FacilityRecord facility = getActiveFacility(facilityId);
+        FacilityRecord facility = findActiveFacility(facilityId);
+        if (facility == null) {
+            return null;
+        }
+
         if (!hasFacilityRole(facilityId, userRoles)) {
             return null;
         }
@@ -197,9 +201,11 @@ public class FacilitiesService {
     @Transactional
     public Map<String, Object> updateFacility(
             Long facilityId,
-            Map<String, Object> request
+            Map<String, Object> request,
+            Set<String> userRoles
     ) {
         FacilityRecord facility = getActiveFacility(facilityId);
+        ensureEditPermission(facilityId, userRoles);
         ensureNotConflicted(facility, request);
 
         if (request.containsKey("facility_name")) {
@@ -709,12 +715,17 @@ public class FacilitiesService {
                 && hasEquipment(facilityId);
     }
 
+    private boolean hasAdminRole(Set<String> userRoles) {
+        return userRoles != null
+                && (userRoles.contains("SYS_ADMIN") || userRoles.contains("USER_ADMIN"));
+    }
+
     private boolean hasFacilityPermission(
             Long facilityId,
             Set<String> userRoles,
             long... permissionIds
     ) {
-        if (userRoles != null && userRoles.contains("SYS_ADMIN")) {
+        if (hasAdminRole(userRoles)) {
             return true;
         }
 
@@ -752,7 +763,7 @@ public class FacilitiesService {
             Long facilityId,
             Set<String> userRoles
     ) {
-        if (userRoles != null && userRoles.contains("SYS_ADMIN")) {
+        if (hasAdminRole(userRoles)) {
             return true;
         }
 
@@ -1047,7 +1058,7 @@ public class FacilitiesService {
             Long parentId,
             Set<String> userRoles
     ) {
-        if (userRoles != null && userRoles.contains("SYS_ADMIN")) {
+        if (hasAdminRole(userRoles)) {
             return;
         }
 

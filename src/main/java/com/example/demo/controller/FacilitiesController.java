@@ -67,15 +67,6 @@ public class FacilitiesController {
         );
     }
 
-    @GetMapping("/{facilityId}/view-html")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> getViewHtml(
-            @PathVariable String facilityId
-    ) {
-        return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.getViewHtml(parseFacilityId(facilityId)))
-        );
-    }
-
     @GetMapping("/{facilityId}/{subPath}")
     public ResponseEntity<ApiResponse<Void>> getUnsupportedFacilitySubPath(
             @PathVariable String facilityId,
@@ -101,10 +92,15 @@ public class FacilitiesController {
     @PutMapping("/{facilityId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> updateFacility(
             @PathVariable String facilityId,
-            @RequestBody Map<String, Object> request
+            @RequestBody Map<String, Object> request,
+            Authentication authentication
     ) {
         return ResponseEntity.ok(
-                ApiResponse.ok(facilitiesService.updateFacility(parseFacilityId(facilityId), request))
+                ApiResponse.ok(facilitiesService.updateFacility(
+                        parseFacilityId(facilityId),
+                        request,
+                        extractRoleNames(authentication)
+                ))
         );
     }
 
